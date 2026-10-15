@@ -1,0 +1,2648 @@
+---
+title: "Estimating variability: From A, B, C to Tau, Sigma, Psi"
+subtitle: "Statistical measures to quantify 'Cognitive Variability' in continuous, bounded and binary data"
+authors: 
+  - name: "Jordy van Langen"
+    orcid: 0000-0003-2504-2381
+  - name: "Michael Aristodemou" 
+    orcid: 0000-0003-0420-2702
+  - name: "Aline Korver"
+    orcid: 0009-0000-4996-6170
+  - name: "Rogier Kievit"
+    orcid: 0000-0003-0700-4568
+date: today
+date-format: "MMMM D, YYYY"
+bibliography: [grateful-refs.bib, my-refs.bib]
+
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left        # sidebar Table of Contents
+    toc-title: "Contents"
+    number-sections: true
+    code-fold: true           # collapaing of code blocks
+    code-tools: true          # source button top-right
+    code-copy: true
+    theme: cosmo              # swap for: flatly, litera, journal, lumen
+    highlight-style: github
+    self-contained: true      # one portable .html file
+    fig-width: 7
+    fig-height: 4.5
+    fig-align: center
+    include-in-header:
+      text: |
+        <script data-goatcounter="https://jorvlan.goatcounter.com/count"
+                async src="//gc.zgo.at/count.js"></script>
+    
+execute:
+  echo: true
+  warning: false
+  message: false
+  cache: false                # cache chunk results — useful if methods are slow
+  
+categories:
+  - cognitive variability
+  - statistical measures              
+
+---
+```{=html}
+<a href="https://jorvlan.goatcounter.com">
+  <img src="https://img.shields.io/badge/page%20views-click%20to%20see-blue?style=flat-square"
+       alt="page views"/>
+</a>
+```
+# Introduction
+
+<center>
+
+**How to cite this tutorial:**
+
+::: {style="white-space: pre-wrap;"}
+```
+van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: A narrative review of cognitive fluctuation in childhood and adolescence. JOURNAL. DOI: 
+```
+:::
+</center>
+
+::: {.callout-tip}
+We would like to acknowledge that other wonderful and detailed tutorials on intraindividual variability measures exist, for instance see [QuantDev Tutorials ](https://quantdev.ssri.psu.edu/tutorials/analysis-experience-sampling-ema-data-chapter-21-univariate-intraindividual-variability/). These cover some of the measures we illustrate (e.g., iSD, MSSD) but in addition explain variability measures for nominal data (e.g., entropy) which is beyond the scope of our tutorial as we primarily focus on continuous (response times) and binary (accuracy) variables. 
+:::
+
+This tutorial is published together with the paper: <DOI> and encompasses an extensive and fully reproducible walk-through of the various statistical measures that can quantify variability in cognitive performance data. With this document, we want to support researchers in estimating a range of measures capturing variability, each with different strengths and weaknesses and the nature of data it is tailored to. This in turn can help further empirical investigation of cognitive variability across a wide range of contexts, tasks and settings. 
+
+Across the known empirical literature, cognitive variability has been operationalized through simple measures like the (individual) Standard Deviation or Coefficient of Variation but also through measures derived from more complex multilevel models such as the Innovations from Dynamic Structural Equation Modeling (DSEM).
+
+Each measure uses the same simulated dataset we provide, with the exception of the Drift Diffusion Model (DDM), the 'Relative Variability' measures and the section about variability in binary variables. We start by explaining the simple direct estimators and end with more complex latent modeling techniques. Please inspect the 'Content' bar on the left side for a quick overview of the flow. 
+
+
+::: {.callout-note}
+This tutorial assumes some familiarity with R and basic descriptive statistics. 
+The code and simulated data discussed in this section are available in the 
+[GitHub repository](https://github.com/jorvlan/cognitive_variability_review_project).
+:::
+
+## Load required R packages
+```{r}
+#| label: setup
+#| code-fold: false
+#| cache: false
+#| message: false
+#| warning: false
+#| results: hide
+
+# set CRAN mirror
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# install pacman if not already installed
+if (!require("pacman", quietly = TRUE)) install.packages("pacman", quiet = TRUE)
+
+# cmdstanr requires a separate installation from Stan
+if (!require("cmdstanr")) {
+  install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+  cmdstanr::install_cmdstan()
+}
+
+# easyRT is only available on GitHub
+if (!require("easyRT")) {
+  if (!require("remotes")) install.packages("remotes")
+  remotes::install_github("DominiqueMakowski/easyRT")
+}
+
+# p_load installs any missing packages from CRAN, then loads all
+pacman::p_load(
+  psych,
+  dplyr,
+  lme4,
+  tidyr,
+  effects,
+  broom,
+  ExGaussEstim,
+  easystats,
+  patchwork,
+  brms,
+  tidyverse,
+  kableExtra,
+  formattable,
+  posterior,
+  bayesplot,
+  tidybayes,
+  datawizard,
+  ggdist,
+  pracma,
+  stats,
+  reshape2,
+  GGally
+)
+
+# load packages that require special installation separately
+library(cmdstanr)
+library(easyRT)
+```
+
+
+## Simulated Data
+
+Here we simulate a dataset representing Intensive Longitudinal Data (ILD) which is common in e.g., experience sampling (ESM) studies. Specifically, we simulate data for 100 subjects, having performed 50 trials on a single day. 
+
+The data is in long format where rows represent trials and columns represent the variables. 
+The R code that simulates the data is directly available [here](https://raw.githubusercontent.com/jorvlan/cognitive_variability_review_project/refs/heads/main/measures/sim_data_review.R).
+
+## Read in simulated dataset
+
+```{r}
+#| label: simulated-data
+#| code-fold: false
+
+df.LSME <- read.csv("https://raw.githubusercontent.com/jorvlan/cognitive_variability_review_project/refs/heads/main/measures/sim_data.csv")
+```
+
+Let's take a first look at the timeseries data. 
+
+```{r}
+#| label: spaghetti-plot
+#| code-fold: false
+
+ggplot(df.LSME, aes(x = time, y = y, group = subject, color = factor(subject))) +
+  geom_line(alpha = 0.2) +
+  guides(color = "none") +
+  labs(title = "Simulated time series for 100 subjects with 50 trials",
+       x = "Trial", y = "Y") +
+  theme_minimal()
+```
+
+## Inspect & explain variables
+```{r}
+#| label: peek-data
+#| code-fold: false
+df.LSME %>% head() %>% knitr::kable()
+```
+
+What does each variable reflect?
+
+- **`subject`**: Number of unique subjects (i.e., 1-100)
+- **`wave`**: Amount of data collection 'waves' in this dataset (i.e., 1).
+- **`time`**: Total number of unique trials within a day/wave. (i.e., 1-50) 
+- **`y`**: Vector of the cognitive time series data (e.g., log-transformed response times).
+- **`Y_tm1`**: Lagged outcome (y at the previous observation within the same day/wave); drives the autoregressive part in models that take autoregression into account.
+- **`Y_tm1d`**: Lagged outcome from the previous day (cross-day lag). 
+- **`ctime`**: Running trial number, but **`time`** divided by 100 to ease the sampler in linear systematic change estimation in e.g., DSEM. 
+- **`mtime`**: Each subject's mean time across observations. This ensures a within-person centered trend so the intercept reflects the person's mean level rather than time = 0.
+
+
+
+
+# Statistical measures
+
+## Overview of Variability Estimates
+
+| Variability Estimate | Conceptual Strength | Conceptual Limitation | Suits Data Type |
+|---|---|---|---|
+| **Individual Standard Deviation (iSD)** | Easy to compute, suitable for continuous data | Not suitable for binary data (mean dependency); potentially conflates distinct characteristics of cognitive performance (e.g., learning effects, measurement error, autocorrelation) | Continuous data (e.g., response times) |
+| **Detrended iSD (residual iSD)** | Easy to compute, suitable for continuous data | Not suitable for binary data (mean dependency); uses residuals as data | Continuous data (e.g., response times) |
+| **Dynamic Structural Equation Modeling (Innovations)** | Flexible and extendible modeling framework; hierarchical modeling allows estimation of random effects across multiple levels; can separate measurement error from innovations | Less suitable for binary data; difficult to implement outside proprietary software; Bayesian sampling can be computationally intensive | Time-series data, Intensive Longitudinal Data (ILD), N = 1, N > 1 |
+| **Mean Square of Successive Differences (MSSD)** | Easy to compute, suitable for binary data | Conflates autocorrelation with innovations and systematic changes | Binary (0/1) data, continuous data |
+| **Detrended MSSD** | Easy to compute, suitable for binary data | Conflates autocorrelation with innovations; uses residuals as data | Binary (0/1) data, continuous data |
+| **root MSSD** | Easy to compute, suitable for binary data; outcome expressed in original raw units (easier for interpretation than MSSD) | Conflates autocorrelation with innovations and systematic changes | Binary(0/1) data, continuous data |
+| **Ex-Gaussian Tau** | Suitable for continuous data; does not assume a Gaussian distribution | Not suitable for binary data | Continuous data (e.g., response times) |
+| **Individual Coefficient of Variation (iCV)** | Easy to compute, not mean dependent | Not suitable for binary data; assumes linear relationship between mean and SD | Continuous data (e.g., response times) |
+| **Drift Diffusion Modeling (Drift/Delta)** | Takes into account speed/accuracy tradeoffs; theoretically interpretable parameters for a subset of choice-response time tasks | Difficult to extend to a wide battery of cognitive tasks and measures | Response time and binary accuracy data |
+| **Gaussian Random-Effects (lme4)** | Easy to estimate for N = 1 data; can examine variability at multiple timescales | Difficulty estimating individual differences in variability components; variability estimates do not benefit from partial pooling | Continuous data (e.g., response times) 
+
+
+: Overview of variability estimates, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
+
+## individual Standard Deviation 
+
+### Description
+
+The individual Standard Deviation (iSD) is the square root of the average squared
+deviation from the mean and the formula is:
+
+$$
+\text{SD}_i = \sqrt{\frac{1}{T-1} \sum_{t=1}^{T}(y_{it} - \bar{y}_i)^2}
+$$
+
+### Estimate iSD
+
+```{r}
+#| label: method-isd
+#| code-fold: false
+
+df.LSME <- df.LSME %>%
+  group_by(subject) %>%
+  mutate(iSD = sd(y, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+#| code-fold: false
+
+# show only the newly added iSD column per subject
+df.LSME %>%
+  distinct(subject, iSD) %>%
+  head() %>%
+  knitr::kable(digits = 2)
+```
+
+```{r}
+#| code-fold: false
+#| fig-keep: all
+
+# pick subjects with highest, lowest, and middle iSD for illustration
+isd_vals <- df.LSME %>% distinct(subject, iSD)
+sample_ids_isd <- c(
+  isd_vals %>% slice_max(iSD, n = 2) %>% pull(subject),
+  isd_vals %>% slice_min(iSD, n = 2) %>% pull(subject),
+  isd_vals %>% slice_min(abs(iSD - median(iSD, na.rm = TRUE)), n = 2) %>% pull(subject)
+)
+
+# build facet labels: "subject X | iSD = Y" (diSD not yet available here)
+label_dat <- df.LSME %>%
+  filter(subject %in% sample_ids_isd) %>%
+  distinct(subject, iSD) %>%
+  mutate(label = paste0("Subject ", subject, " | iSD = ", round(iSD, 2)))
+facet_labels <- setNames(label_dat$label, label_dat$subject)
+
+# show raw scores + iSD band for selected subjects
+ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
+       aes(x = time, y = y)) +
+  geom_point() +
+  geom_line(alpha = 0.2) +
+  geom_hline(data = df.LSME %>% filter(subject %in% sample_ids_isd) %>%
+               group_by(subject) %>%
+               summarise(mean_y = mean(y, na.rm = TRUE),
+                         iSD    = sd(y,   na.rm = TRUE)),
+             aes(yintercept = mean_y), color = "red", linetype = "dashed") +
+  geom_hline(data = df.LSME %>% filter(subject %in% sample_ids_isd) %>%
+               group_by(subject) %>%
+               summarise(mean_y = mean(y, na.rm = TRUE),
+                         iSD    = sd(y,   na.rm = TRUE)),
+             aes(yintercept = mean_y + iSD), color = "blue", linetype = "dotted") +
+  geom_hline(data = df.LSME %>% filter(subject %in% sample_ids_isd) %>%
+               group_by(subject) %>%
+               summarise(mean_y = mean(y, na.rm = TRUE),
+                         iSD    = sd(y,   na.rm = TRUE)),
+             aes(yintercept = mean_y - iSD), color = "blue", linetype = "dotted") +
+  facet_wrap(~subject, labeller = labeller(subject = facet_labels)) +
+  labs(title = "iSD per subject",
+       subtitle = "Red dashed = mean; blue dotted = mean ± 1 SD")
+```
+
+### Results
+
+```{r}
+#| label: plot-sd
+#| code-fold: false
+
+ggplot(df.LSME %>% distinct(subject, iSD), aes(x = iSD)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(df.LSME$iSD, na.rm = TRUE), linetype = "dashed") +
+  labs(title = "Distribution of iSD",
+       x = "Value", y = "Count") +
+  theme_minimal()
+```
+
+---
+
+## Detrended Individual Standard Deviation (residual iSD)
+
+### Description
+
+One weakness of the iSD is that even a modest trend in the timeseries can 
+inflate the iSD by an order of magnitude [@jahng2008, p. 357]. The detrended 
+iSD removes the linear trend from each subject's time series before computing 
+the standard deviation. Detrending the timeseries before computing the SD 
+prevents systematic changes over time (e.g., learning or fatigue effects) from 
+inflating the variability estimate.
+
+First, a linear trend is fitted for each subject:
+
+$$\hat{y}_{it} = \beta_{0i} + \beta_{1i} \cdot t_{it}$$
+
+The trend is then subtracted from the observed scores to obtain the residuals:
+
+$$e_{it} = y_{it} - \hat{y}_{it}$$
+
+The detrended iSD is then computed as the standard deviation of these residuals:
+
+$$\text{iSD}_{\text{detrended},i} = \sqrt{\frac{1}{T-1} \sum_{t=1}^{T}(e_{it} - \bar{e}_i)^2}$$
+
+where $T$ is the number of time points, $e_{it}$ is the residual for subject $i$
+at time $t$, and $\bar{e}_i$ is the subject's mean residual (which is zero by
+construction of the linear model).
+
+### Estimate detrended iSD
+
+```{r}
+#| label: method-disd
+#| code-fold: false
+
+df.LSME <- df.LSME %>%
+  group_by(subject) %>%
+  mutate(
+    trend     = predict(lm(y ~ time)),
+    y_detrend = y - trend,
+    diSD      = sd(y_detrend, na.rm = TRUE)
+  ) %>%
+  ungroup()
+```
+
+```{r}
+#| code-fold: false
+
+df.LSME %>%
+  distinct(subject, iSD, diSD) %>%
+  head() %>%
+  knitr::kable(digits = 2)
+```
+
+### Results
+
+```{r}
+#| code-fold: false
+
+# fit trends for all subjects first
+trends <- df.LSME %>%
+  group_by(subject) %>%
+  summarise(slope = coef(lm(y ~ time))[2])
+
+df.LSME <- df.LSME %>%
+  left_join(trends, by = "subject")
+
+# labels with iSD only — for the raw trend plot
+label_dat_isd_only <- df.LSME %>%
+  filter(subject %in% sample_ids_isd) %>%
+  distinct(subject, iSD) %>%
+  mutate(label = paste0("Subject ", subject, " | iSD = ", round(iSD, 2)))
+facet_labels_isd_only <- setNames(label_dat_isd_only$label, label_dat_isd_only$subject)
+
+# labels with both iSD and diSD — for the detrended plot
+label_dat_disd <- df.LSME %>%
+  filter(subject %in% sample_ids_isd) %>%
+  distinct(subject, iSD, diSD) %>%
+  mutate(label = paste0("Subject ", subject,
+                        " | iSD = ",  round(iSD,  2),
+                        " | diSD = ", round(diSD, 2)))
+facet_labels_disd <- setNames(label_dat_disd$label, label_dat_disd$subject)
+```
+
+#### Step 1: Visualize linear trend fit
+
+```{r}
+#| code-fold: false
+
+ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
+       aes(x = time, y = y)) +
+  geom_line(alpha = 0.4) +
+  geom_point(aes(color = y_detrend^2)) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  scale_color_viridis_c(option = "magma", name = "Residual²") +
+  facet_wrap(~subject, labeller = labeller(subject = facet_labels_isd_only)) +
+  labs(title = "Fitted linear trend per subject",
+       subtitle = "Point color reflects squared deviation from trend")
+```
+
+#### Step 2: Visualize detrended residuals
+
+```{r}
+#| code-fold: false
+
+ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
+       aes(x = time, y = y_detrend)) +
+  geom_point() +
+  geom_line(alpha = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  facet_wrap(~subject, labeller = labeller(subject = facet_labels_disd)) +
+  labs(title = "Detrended scores (residuals)")
+```
+
+#### Step 3: Show detrended iSD values
+
+```{r}
+#| label: plot-disd
+#| code-fold: false
+
+ggplot(df.LSME %>% distinct(subject, diSD), aes(x = diSD)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(df.LSME$diSD, na.rm = TRUE), linetype = "dashed") +
+  labs(title = "Distribution of detrended iSD",
+       x = "Detrended iSD", y = "Count") +
+  theme_minimal()
+```
+
+::: {.callout-note}
+The same logic of residualizing for trends can also be applied with other 
+functions. For instance, a second-order polynomial would merely require 
+replacing the linear model with:
+
+```r
+summarise(slope = coef(lm(y ~ time + I(time^2)))[2])
+```
+
+and the smooth with:
+
+```r
+geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE, color = "red")
+```
+:::
+
+```{r}
+#| code-fold: false
+
+ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
+       aes(x = time, y = y)) +
+  geom_line(alpha = 0.4) +
+  geom_point(aes(color = y_detrend^2)) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE, color = "red") +
+  scale_color_viridis_c(option = "magma", name = "Residual²") +
+  facet_wrap(~subject, labeller = labeller(subject = facet_labels_isd_only)) +
+  labs(title = "Polynomial (2nd order) trend fit per subject",
+       subtitle = "Point color reflects squared deviation from linear trend")
+```
+
+---
+
+## Individual Coefficient of Variation (iCV)
+
+### Description
+
+The individual Coefficient of Variation (iCV) reflects each subject's
+standard deviation relative to their mean, making it scale-free and
+comparable across subjects with different mean levels. In comparison to the 
+relative variability indices by Mestdagh et al., (2018), see further below, the iCV is 
+suited for variables with a lower bound (e.g. response times) whereas the 
+relative variability indices are suited for variables with both a lower and 
+upper bound (e.g. Visual Analogue Scales).
+
+$$
+\text{iCV}_i = \frac{\text{iSD}_i}{\bar{y}_i}
+$$
+
+where $\text{iSD}_i$ is the standard deviation of subject $i$'s scores and
+$\bar{y}_i$ is their personal mean. Unlike the iSD, the iCV is not affected
+by the subject's mean level, which makes it useful when individual differences
+in means are expected.
+
+
+::: {.callout-warning}
+iCV can only be interpreted when values are positive. Subjects that have negative or a mean close to zero result in extreme iCV values. Subjects that have a negative or very small mean will produce extreme values and a mean of 0 breaks the iCV estimation. It is recommended to shift the data prior to calculating the iCV, similar to the ex-Gaussian approach below.
+:::
+
+
+### Estimate iCV
+
+```{r}
+#| label: method-icv
+#| code-fold: false
+
+# Shifting the outcome so that it is positive
+df.LSME <- df.LSME %>%
+  mutate(y_icv = y + abs(min(y)) + 0.001)
+  
+  
+df.LSME <- df.LSME %>%
+  group_by(subject) %>%
+  mutate(
+    iMU = mean(y_icv, na.rm = TRUE),
+    iCV = iSD / iMU
+  ) %>%
+  ungroup()
+```
+
+```{r}
+#| code-fold: false
+
+df.LSME %>%
+  distinct(subject, iSD, diSD, iCV) %>%
+  head() %>%
+  knitr::kable(digits = 2)
+```
+
+### Results
+
+If we do *not* shift:
+
+```{r}
+#| code-fold: false
+
+# compute iCV on raw (unshifted) y to illustrate the problem
+iCV_raw <- df.LSME %>%
+  group_by(subject) %>%
+  summarise(
+    iMU_raw = mean(y, na.rm = TRUE),
+    iSD_raw = sd(y,   na.rm = TRUE),
+    iCV_raw = iSD_raw / iMU_raw
+  )
+
+ggplot(iCV_raw, aes(x = iCV_raw)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(iCV_raw$iCV_raw, na.rm = TRUE), linetype = "dashed") +
+  labs(title = "iCV without shifting — extreme values near-zero means",
+       x = "iCV (unshifted)", y = "Count") +
+  theme_minimal()
+```
+
+::: {.callout-note}
+This histogram illustrates that extreme values are caused by indiviudals with very small means close to zero. It is difficult to interpret this figure as the mean (dashed line) is pulled away from the distribution. 
+:::
+
+If we *do* shift:
+
+```{r}
+#| label: plot-icv
+#| code-fold: false
+
+ggplot(df.LSME %>% distinct(subject, iCV), aes(x = iCV)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(df.LSME %>% distinct(subject, iCV) %>% pull(iCV),
+                               na.rm = TRUE), linetype = "dashed") +
+  labs(title = "iCV after shifting — distribution is now interpretable",
+       x = "iCV (shifted)", y = "Count") +
+  theme_minimal()
+```
+
+---
+
+## Mean Square of Successive Differences (MSSD)
+
+### Description
+
+The MSSD captures variability by computing the average squared difference
+between consecutive observations. Unlike the iSD, it is sensitive to the
+**order** of measurements, making it suitable to capture instability over time:
+
+$$
+\text{MSSD}_i = \frac{1}{T-1} \sum_{t=2}^{T}(y_{it} - y_{i,t-1})^2
+$$
+
+where $T$ is the number of time points and $y_{it} - y_{i,t-1}$ is the
+difference between consecutive observations for subject $i$.
+
+### Estimate MSSD
+
+```{r}
+#| label: method-mssd
+#| code-fold: false
+
+df.LSME <- df.LSME %>%
+  group_by(subject) %>%
+  mutate(
+    MSSD = psych::mssd(y, na.rm = TRUE),
+    ssd  = c(NA, diff(y)^2)  # trial-level squared successive difference
+  ) %>%
+  ungroup()
+```
+
+```{r}
+#| code-fold: false
+
+df.LSME %>%
+  distinct(subject, MSSD) %>%
+  head() %>%
+  knitr::kable(digits = 2)
+```
+
+### Results
+
+```{r}
+#| code-fold: false
+
+# build facet labels with MSSD only
+label_dat_mssd <- df.LSME %>%
+  filter(subject %in% sample_ids_isd) %>%
+  distinct(subject, MSSD) %>%
+  mutate(label = paste0("Subject ", subject, " | MSSD = ", round(MSSD, 2)))
+facet_labels_mssd <- setNames(label_dat_mssd$label, label_dat_mssd$subject)
+
+# show raw scores with color-coded successive differences
+ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
+       aes(x = time, y = y)) +
+  geom_line(alpha = 0.2) +
+  geom_point(aes(color = ssd)) +
+  scale_color_viridis_c(option = "magma", name = "Succ. Diff²", na.value = "lightgrey") +
+  geom_hline(data = df.LSME %>% filter(subject %in% sample_ids_isd) %>%
+               group_by(subject) %>%
+               summarise(mean_y = mean(y, na.rm = TRUE)),
+             aes(yintercept = mean_y), color = "red", linetype = "dashed") +
+  facet_wrap(~subject, labeller = labeller(subject = facet_labels_mssd)) +
+  labs(title = "MSSD per subject",
+       subtitle = "Point color reflects squared successive difference; red dashed = mean")
+```
+
+```{r}
+#| label: plot-mssd
+#| code-fold: false
+
+ggplot(df.LSME %>% distinct(subject, MSSD), aes(x = MSSD)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(df.LSME %>% distinct(subject, MSSD) %>% pull(MSSD),
+                               na.rm = TRUE), linetype = "dashed") +
+  labs(title = "Distribution of MSSD across subjects",
+       x = "MSSD", y = "Count") +
+  theme_minimal()
+```
+
+---
+
+## Detrended Mean Square of Successive Differences (Detrended MSSD)
+
+### Description
+
+The detrended MSSD first removes the linear trend from each subject's time
+series before computing the average squared difference between consecutive
+observations. This prevents systematic changes over time from inflating the
+variability estimate:
+
+$$
+\text{MSSD}_{\text{detrended},i} = \frac{1}{T-1} \sum_{t=2}^{T}(e_{it} - e_{i,t-1})^2
+$$
+
+where $T$ is the number of time points and $e_{it} = y_{it} - \hat{y}_{it}$
+is the residual after removing the linear trend for subject $i$.
+
+### Estimate detrended MSSD
+
+```{r}
+#| label: method-dmssd
+#| code-fold: false
+
+df.LSME <- df.LSME %>%
+  group_by(subject) %>%
+  mutate(MSSD_detrend = psych::mssd(y_detrend, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+#| code-fold: false
+
+df.LSME %>%
+  distinct(subject, MSSD, MSSD_detrend) %>%
+  head() %>%
+  knitr::kable(digits = 2)
+```
+
+### Results
+
+```{r}
+#| code-fold: false
+
+# build facet labels with MSSD only — for the raw trend plot
+label_dat_mssd_only <- df.LSME %>%
+  filter(subject %in% sample_ids_isd) %>%
+  distinct(subject, MSSD) %>%
+  mutate(label = paste0("Subject ", subject, " | MSSD = ", round(MSSD, 2)))
+facet_labels_mssd_only <- setNames(label_dat_mssd_only$label, label_dat_mssd_only$subject)
+
+# build facet labels with MSSD + detrended MSSD — for the detrended plot
+label_dat_dmssd <- df.LSME %>%
+  filter(subject %in% sample_ids_isd) %>%
+  distinct(subject, MSSD, MSSD_detrend) %>%
+  mutate(label = paste0("Subject ", subject,
+                        " | MSSD = ",  round(MSSD,         2),
+                        " | dMSSD = ", round(MSSD_detrend, 2)))
+facet_labels_dmssd <- setNames(label_dat_dmssd$label, label_dat_dmssd$subject)
+```
+
+#### Step 1: Visualize linear trend fit
+
+```{r}
+#| code-fold: false
+
+ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
+       aes(x = time, y = y)) +
+  geom_line(alpha = 0.4) +
+  geom_point(aes(color = ssd)) +
+  scale_color_viridis_c(option = "magma", name = "Succ. Diff²", na.value = "lightgrey") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  facet_wrap(~subject, labeller = labeller(subject = facet_labels_mssd_only)) +
+  labs(title = "Fitted linear trend per subject",
+       subtitle = "Point color reflects squared successive difference")
+```
+
+
+#### Step 2: Visualize consecutive differences of detrended residuals
+
+```{r}
+#| code-fold: false
+
+ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
+       aes(x = time, y = y_detrend)) +
+  geom_point() +
+  geom_line(alpha = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  facet_wrap(~subject, labeller = labeller(subject = facet_labels_dmssd)) +
+  labs(title = "Detrended residuals (lines emphasize consecutive differences)",
+       y = "Detrended residual") +
+  theme(strip.text = element_text(size = 7))
+```
+
+#### Step 3: Show detrended MSSD values
+
+```{r}
+#| label: plot-dmssd
+#| code-fold: false
+
+ggplot(df.LSME %>% distinct(subject, MSSD_detrend), aes(x = MSSD_detrend)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(df.LSME %>% distinct(subject, MSSD_detrend) %>%
+                               pull(MSSD_detrend), na.rm = TRUE),
+             linetype = "dashed") +
+  labs(title = "Distribution of detrended MSSD across subjects",
+       x = "Detrended MSSD", y = "Count") +
+  theme_minimal()
+```
+
+::: {.callout-note}
+When there is a linear trend, the detrended MSSD will be almost identical to the MSSD. As successive differences are computed, the linear trend of a slope will just add a constant value to the difference, meaning that the variance of differences and MSSD will remain unchanged. In cases where successive difference are not constant such as non-linear trends (cubic, quadratic etc.) systematic changes (trend) can inflate the raw MSSD. 
+:::
+
+## Root Mean Square of Successive Differences (rMSSD)
+
+### Description
+
+The rMSSD computes the square root of the average squared difference between
+consecutive observations which transforms the values back to the original scale which can aid with interpretation. Unlike the detrended MSSD, it operates on the raw
+time series (instead of residuals) and does not remove a trend. 
+
+$$
+\text{rMSSD}_i = \sqrt{\frac{1}{T-1} \sum_{t=2}^{T}(y_{it} - y_{i,t-1})^2}
+$$
+
+where $T$ is the number of time points and $y_{it} - y_{i,t-1}$ is the
+difference between consecutive observations for subject $i$.
+
+
+### Estimate root MSSD
+
+```{r}
+#| label: method-rmssd
+#| code-fold: false
+
+df.LSME <- df.LSME %>%
+  group_by(subject) %>%
+  mutate(rMSSD = psych::rmssd(y, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+#| code-fold: false
+
+df.LSME %>%
+  distinct(subject, MSSD, MSSD_detrend, rMSSD) %>%
+  head() %>%
+  knitr::kable(digits = 2)
+```
+
+### Results
+
+```{r}
+#| label: plot-rmssd
+#| code-fold: false
+
+ggplot(df.LSME %>% distinct(subject, rMSSD), aes(x = rMSSD)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(df.LSME$rMSSD), linetype = "dashed") +
+  labs(title = "Distribution of rMSSD across subjects",
+       x = "rMSSD", y = "Count") +
+  theme_minimal()
+```
+
+## Ex-Gaussian Tau
+
+### Description
+
+The ex-Gaussian distribution is a combination of a normal and an exponential
+distribution, frequently used to model response time distributions. Here we have 3
+parameters: $\mu$ and $\sigma$ describing the normal component, and $\tau$
+describing the exponential tail. The $\tau$ parameter captures the degree of
+right-skew in the distribution and is interpreted as a measure of
+intra-individual variability:
+
+$$
+\tau_i = \frac{1}{\lambda_i}
+$$
+
+where $\lambda_i$ is the rate parameter of the exponential component for
+subject $i$. Larger $\tau$ values indicate a longer, heavier tail —
+reflecting more extreme slow responses.
+
+::: {.callout-note}
+The ex-Gaussian distribution needs positive values. The simulated
+data is shifted by its absolute minimum (adding a small constant of .001) to ensure all values are positive and ensures this works despite the random seed or data used. 
+:::
+
+
+### Estimate ex-Gaussian tau
+
+```{r}
+#| label: method-exgaussian
+#| code-fold: false
+#| cache: false
+
+# Shift y so it is positive
+df.LSME <- df.LSME %>% mutate(y_shifted = y + abs(min(df.LSME$y)) + 0.001)
+
+# Estimate ex-Gaussian parameters per subject
+subject_exGauss <- data.frame(subject = character(),
+                              mu    = numeric(),
+                              sigma = numeric(),
+                              tau   = numeric(),
+                              stringsAsFactors = FALSE)
+
+# Use only first 20 subjects
+sub_id <- unique(df.LSME$subject)[1:20]
+
+for (subj in sub_id) {
+  tryCatch({
+    subject_data <- df.LSME %>% filter(subject == subj)
+    fit <- BayesianExgaussian(n = 50, x = subject_data$y_shifted,
+                          nSamples = 500, Ti = 250)
+    subject_exGauss <- rbind(subject_exGauss,
+                             data.frame(subject = subj,
+                                        mu    = fit$mu,
+                                        sigma = fit$sigma,
+                                        tau   = fit$tau))
+  }, error = function(e) {
+    message("Skipping subject ", subj, ": ", e$message)
+  })
+}
+
+# join tau back into df.LSME
+df.LSME <- df.LSME %>%
+  left_join(subject_exGauss %>% select(subject, tau,sigma,mu), by = "subject")
+```
+
+```{r}
+#| code-fold: false
+
+df.LSME %>%
+  distinct(subject, tau, sigma, mu) %>%
+  head() %>%
+  knitr::kable(digits = 2)
+```
+
+### Results
+
+```{r}
+#| label: plot-exgaussian
+#| code-fold: false
+#| fig-keep: all
+
+ggplot(subject_exGauss, aes(x = tau)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(subject_exGauss$tau), linetype = "dashed") +
+  labs(title = "Distribution of ex-Gaussian tau across subjects",
+       x = "Tau", y = "Count") +
+  theme_minimal()
+
+ggplot(subject_exGauss, aes(x = mu)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(subject_exGauss$mu), linetype = "dashed") +
+  labs(title = "Distribution of ex-Gaussian mu across subjects",
+       x = "Mu", y = "Count") +
+  theme_minimal()
+
+ggplot(subject_exGauss, aes(x = sigma)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(subject_exGauss$sigma), linetype = "dashed") +
+  labs(title = "Distribution of ex-Gaussian sigma across subjects",
+       x = "Sigma", y = "Count") +
+  theme_minimal()
+```
+
+::: {.callout-note}
+Here we use `BayesianExgaussian()` from the package `ExGaussEstim` and estimate parameters for each subject separately. Hence, we do not pool information from subjects in a hierarchical fashion. Estimating a hierarchical ex-gaussian is, in theory, possible with package `brms` using `family = exgaussian()`.
+:::
+
+
+### Overview of all measures (thus far)
+
+```{r}
+#| code-fold: false
+
+df.LSME_wider <- df.LSME %>%
+  group_by(subject) %>%
+  summarise(
+    y            = mean(y,            na.rm = TRUE),
+    iSD          = mean(iSD,          na.rm = TRUE),
+    diSD         = mean(diSD,         na.rm = TRUE),
+    iCV          = mean(iCV,          na.rm = TRUE),
+    MSSD         = mean(MSSD,         na.rm = TRUE),
+    MSSD_detrend = mean(MSSD_detrend, na.rm = TRUE),
+    rMSSD        = mean(rMSSD,        na.rm = TRUE),
+    tau          = mean(tau,          na.rm = TRUE),
+    sigma        = mean(sigma,        na.rm = TRUE),
+    mu           = mean(mu,           na.rm = TRUE)
+  )
+
+df.LSME_wider %>% head() %>% knitr::kable(digits = 2)
+```
+
+### Correlations between measures
+
+```{r}
+#| code-fold: false
+
+GGally::ggpairs(df.LSME_wider[, c("iSD", "diSD", "iCV", 
+                                   "MSSD", "MSSD_detrend", "rMSSD", 
+                                   "tau", "sigma", "mu")]) +
+  theme(axis.text = element_text(size = 5),
+        strip.text = element_text(size = 5))
+```
+
+## residual Standard Deviation (SD) from Linear Regression Model (lme4)
+
+### Description
+
+A linear model is fitted for each individual subject independently, regressing the outcome
+$y$ on the intercept, a trend (time), and the autoregressive term $y_{t-1}$.
+The residual standard deviation $\hat{\sigma}_i$ is extracted as the measure
+of variability — capturing the spread of observations around a subject's predicted outcome.
+
+$$
+y_{it} = \beta_{0i} + \beta_{1i} \cdot \text{time}_{it} + \beta_{2i} \cdot y_{i,t-1} + \varepsilon_{it}, \quad \varepsilon_{it} \sim \mathcal{N}(0, \sigma_i^2)
+$$
+
+where $\sigma_i$ is the residual standard deviation for subject $i$.
+
+### Estimate residual SD from a Linear Model
+
+```{r}
+#| label: method-lm
+#| cache: false
+
+sub_id <- unique(df.LSME$subject)
+
+# Fit lm for each subject
+twolevel <- list()
+for (subj in sub_id) {
+  subject_data     <- df.LSME %>% filter(subject == subj)
+  twolevel[[subj]] <- lm(y ~ 1 + ctime + Y_tm1, data = subject_data)
+}
+
+# Extract effects
+effects_list <- list()
+for (subj in sub_id) {
+  effects_list[[subj]] <- as.data.frame(tidy(twolevel[[subj]]))
+}
+
+# Store estimates per subject
+intercept <- data.frame()
+trend     <- data.frame()
+ar1       <- data.frame()
+trialsd   <- data.frame()
+
+for (subj in sub_id) {
+  intercept[subj, 1] <- effects_list[[subj]]$estimate[1]
+  trend[subj, 1]     <- effects_list[[subj]]$estimate[2]
+  ar1[subj, 1]       <- effects_list[[subj]]$estimate[3]
+  trialsd[subj, 1]   <- summary(twolevel[[subj]])$sigma
+}
+
+# Add residual SD to df.LSME
+df.LSME <- df.LSME %>%
+  left_join(
+    data.frame(subject = sub_id, lm_sigma = unlist(trialsd)),
+    by = "subject"
+  )
+```
+
+
+```{r}
+#| label: peek-lm
+#| code-fold: false
+df.LSME %>% head() %>% knitr::kable()
+```
+
+
+### Results
+
+```{r}
+#| label: plot-lm
+#| code-fold: false
+
+ggplot(df.LSME %>% distinct(subject, lm_sigma), aes(x = lm_sigma)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(df.LSME$lm_sigma, na.rm = TRUE), linetype = "dashed") +
+  labs(title = "Distribution of residual SD across subjects",
+       x = "Residual SD", y = "Count") +
+  theme_minimal()
+```
+
+
+## Dynamic Structural Equation Modeling (DSEM)
+
+::: {.callout-tip}
+Researchers from the [Lifespan Cognitive Dynamics Lab](https://lifespancognitivedynamics.com/) have developed openly available resources for DSEM such as a DSEM tutorial in R where the focus is less on variability, but more on the general framework and recent extensions such as modeling asymmetry in the autoregresive structure. The DSEM tutorial can be consulted [here](https://jessicaschaaf.github.io/jessicaschaaf/dsem-workshop.html) and the DSEM paper about DYNamics of ASymmetric TIme series (DYNASTI) can be found [here](https://doi.org/10.1080/10705511.2025.2519208).
+:::
+
+
+### Description
+
+DSEM estimates within-subject variability as the standard deviation of the innovations — the residual spread around each subject's predicted trajectory. Here we fit a 4-parameter DSEM after accounting for the mean, linear systematic change, and the autoregressive structure where next to population-level fixed effects, random effects (individual differences in the subject-specific parameters) are estimated.
+
+
+$$
+y_{it} \sim \mathcal{N}\left(\alpha_i + \beta_i(t - \bar{t}_i) + \phi_i(y_{i,t-1} - \alpha_i),\ \exp(\sigma + u_{4i})\right)
+$$
+
+where $\alpha_i$ is the subject mean, $\beta_i$ is the systematic change over time (trend) and $\phi_i$ is the
+autoregressive parameter. Crucially, $\exp(\sigma + u_{4i})$ describes the the population level variability through $\sigma$ and the individual differences or random effects are indicated by $u_{4i}$. This is the key parameter of interest for estimating cognitive variability and quantifies how much subjects differ from each other in their variability over and above systematic change and autocorrelation.
+
+
+::: {.callout-note}
+In this tutorial, we fit a DSEM in Stan via `cmdstanr`. Sampling 4 chains with 1000
+iterations each is computationally intensive — expect some computation time.
+:::
+
+
+### Estimating a DSEM
+
+Stan, the language we specify our DSEM in, requires data to be formatted in a list. Stan needs to identify the correct data sources, so we have to create variables in a list and assign data to each variable.
+
+Here we briefly explain each variable within the list.
+
+- **`N_subj`**: Number of unique subjects; determines the size of subject-level random effect vectors.
+- **`Y`**: Vector of the time series data (outcome variable being modelled).
+- **`N_obs`**: Total number of unique trials within a day/wave. *Not used in this model.*
+- **`N_days`**: Number of days. *Not used in this model.*
+- **`N`**: Total number of observations (rows); used as the main loop bound throughout the model.
+- **`subj`**: Integer index identifying which subject each row belongs to; used to look up that subject's random effects `u[subj, ...]`.
+- **`day`**: Integer index identifying which wave/day each row belongs to. *Not used in this model.*
+- **`Y_tm1`**: Lagged outcome (Y at the previous observation within the same day/wave); drives the autoregressive part: `(Y_tm1 - person_mean) * (phi + u[subj,3])`.
+- **`Y_tm1d`**: Lagged outcome from the previous day (cross-day lag). *Not used in this model.*
+- **`time`**: Within-day centred time of each observation; used in the linear time trend: `(time - mtime[subj]) * (beta + u[subj,2])`.
+- **`mtime`**: Each subject's mean time across observations (length = `N_subj`); centres the trend so the intercept reflects the person's mean level rather than time = 0.
+
+#### Create list for DSEM
+
+
+```{r}
+#| label: method-dsem-data
+#| code-fold: false
+
+# Create vector with centering variable for the mean
+l2time <- df.LSME %>%
+  group_by(subject) %>%
+  summarise(mtime = mean(ctime, na.rm = TRUE)) %>%
+  pull(mtime)
+
+# Create list for DSEM
+dsem_list <- list(
+  N_subj  = length(unique(as.numeric(as.factor(df.LSME$subject)))),
+  Y       = df.LSME$y,
+  N_obs   = length(unique(df.LSME$time)),
+  N_days  = length(unique(as.numeric(as.factor(df.LSME$wave)))),
+  subj    = as.numeric(as.factor(df.LSME$subject)),
+  day     = as.numeric(as.factor(df.LSME$wave)),
+  N       = nrow(df.LSME),
+  mtime   = l2time,
+  time    = df.LSME$ctime,
+  Y_tm1   = df.LSME$Y_tm1,
+  Y_tm1d  = df.LSME$Y_tm1d
+)
+
+# Inspect list
+str(dsem_list)
+```
+
+
+#### Compile DSEM model
+
+
+::: {.callout-note}
+The DSEM model code below is written in [Stan](https://mc-stan.org/) and 'vectorized' to optimize Bayesian sampling. You can learn more about 'Vectorization' [here](https://mc-stan.org/docs/2_18/stan-users-guide/vectorization.html) 
+:::
+
+```{r}
+#| label: method-dsem-compile
+#| code-fold: false
+
+
+
+
+dsem_standard <- "
+//-----------------------------------------------//
+// Dynamic Structural Equation Model (DSEM):
+// Estimates intra-individual trajectories in Y (alpha) over time,
+// while simultaneously taking into account the autocorrelation (phi), systematic change by a linear trend (beta),
+// and residual variance (sigma), and allowing individuals to differ in these effects. (random effects).
+// The model code is written in Stan and vectorized 
+// see https://mc-stan.org/ and https://mc-stan.org/docs/2_18/stan-users-guide/vectorization.html
+// To make the model specification easier to digest, we provide short comments for each section.
+//------------------------------------------------//
+
+data {
+  int<lower = 1> N; // total number of trials
+  int<lower = 1> N_subj; // total number of subjects
+  array[N] int<lower=1, upper=N_subj> subj; // subject index for each trial
+  vector[N] Y; // outcome variable (RT)
+  vector[N] time; // running trial number of Y
+  vector[N] Y_tm1; // lagged outcome variable (Y at t-1)
+  vector[N_subj] mtime; // within-person mean time centered (for the linear trend)
+}
+parameters {
+  real sigma; // Population-level residual SD (log-scale)
+  vector<lower=0>[4] tau_u; // Random effects SDs (4 total, 1 for each parameter)
+  real alpha; // Population-level mean
+  real beta; // Population-level trend
+  real phi; // Population-level autocorrelation
+  matrix[4, N_subj] z_u; // Random effects (non-centered parameterization)
+  cholesky_factor_corr[4] L_u; // Cholesky factor of random effects correlation matrix
+                              // see https://bruno.nicenboim.me/bayescogsci/ch-complexstan.html#sec-corrstan
+}
+transformed parameters {
+  matrix[N_subj,4] u; // subject-specific random effects (alpha, beta, phi, sigma)
+  // reconstruct random effects from Cholesky factor and standardized deviations
+  u = transpose(diag_pre_multiply(tau_u, L_u) * z_u);
+}
+
+model {
+  // population-level priors
+  alpha ~ normal(0, 50); // population-level mean prior
+  phi   ~ normal(0, 50); // population-level autocorrelation prior
+  beta  ~ normal(0, 50); // population-level trend prior
+  sigma ~ normal(0, 50); // population-level log residual SD prior
+  tau_u ~ cauchy(0, 2); // random-effects SDs prior
+
+  // priors for non-centered parameterization
+  to_vector(z_u) ~ std_normal();
+  L_u ~ lkj_corr_cholesky(1); // LKJ prior 1 (uniform across correlation matrices)
+
+  // likelikhood
+  // mean = intercept + subject-specific deviation +
+  //        person-mean centered time +
+  //        autocorrelation of deviations from intercept 
+  //        residual SD = exp(sigma); on log-scale to assume normal distribution which simplifies estimation
+  Y ~ normal(alpha + u[subj,1] + (time - mtime[subj]).*(beta+u[subj,2]) + 
+             (Y_tm1 - (alpha + u[subj,1])).*(phi+u[subj,3]),
+             exp(sigma + u[subj,4])); 
+}
+generated quantities {
+  // retrieve correlation matrix from Cholesky factor
+  corr_matrix[4] rho_u = L_u * L_u';
+  // pointwise log-likelihood (used for model comparison e.g., LOO-CV)
+  vector[N] log_lik;
+    
+  for (i in 1:N) {
+    log_lik[i] = normal_lpdf(Y[i] | alpha + u[subj[i],1] +
+      (time[i] - mtime[subj[i]]).*(beta+u[subj[i],2]) +
+      (Y_tm1[i] - (alpha + u[subj[i],1])).*(phi+u[subj[i],3]),
+      exp(sigma + u[subj[i],4]));
+  }
+  // sum of log-likelihoods
+  real sum_ll = sum(log_lik);
+}
+"
+
+writeLines(dsem_standard, "dsem_standard.stan") # write the model code to disk
+
+# Reload the model code and apply stanc optimization (see https://mc-stan.org/docs/stan-users-guide/using-stanc.html)
+model2 <- cmdstan_model(
+  "dsem_standard.stan",
+  stanc_options = list("O1")
+)
+```
+
+#### Fit DSEM
+```{r}
+#| label: method-dsem-fit
+#| code-fold: false
+#| cache: false
+#| eval: !expr "!file.exists('fit2.rds')"
+
+# Verify data before fitting
+stopifnot(
+  is.list(dsem_list),
+  exists("model2")
+)
+
+# Fit the model
+fit2 <- model2$sample(
+  dsem_list,
+  chains = 4,
+  parallel_chains = 2,
+  iter_warmup = 500,
+  iter_sampling = 1000,
+  save_warmup = FALSE,
+  refresh         = 100
+)
+
+# save the fit object
+fit2$save_object("fit2.rds") 
+```
+
+::: {.callout-note}
+The model was fit using 4 chains with 500 warmup and 1000 sampling 
+iterations each, run on 2 parallel chains, resulting in 4000 
+post-warmup draws total.
+:::
+
+#### Reload
+```{r}
+#| label: method-dsem-load
+#| code-fold: false
+#| cache: false
+fit2 <- readRDS("fit2.rds")
+```
+
+
+
+```{r}
+#| label: method-dsem-draws
+#| code-fold: false
+# Extract draws of parameters for table
+draws <- fit2$draws(format = "df", c("alpha", "beta", "phi", "sigma",
+                                      "tau_u[1]", "tau_u[2]", "tau_u[3]",
+                                      "tau_u[4]")) 
+
+sum2 <- posterior::summarise_draws(
+  draws,
+  "mean",
+  "median",
+  "sd",
+  "mad",
+  ~quantile(.x, probs = c(0.025, 0.975)),
+  "rhat",
+  "ess_bulk",
+  "ess_tail"
+)
+
+print2<-print(sum2) # print parameters
+
+```
+
+
+### Results
+
+From this output there is many information to inspect. We'll briefly go over it.
+
+- **`alpha`**: population mean
+- **`beta`**: population trend
+- **`phi`**: population autoregression
+- **`sigma`**: population log residual SD 
+
+Standard deviations of random effects:
+
+- **`tau_u`**: a vector of 4 SDs, one for each random effect.
+
+Key information about each resulting parameter estimate:
+
+- **`mean`**:  The mean of the posterior distribution of each parameter. Frequently reported as ‘the best point estimate of the parameter.
+- **`median`**: the 50% posterior quantile.
+- **`sd`**: the posterior standard deviation. Reflects the uncertainty in the parameter estimate where larger values indicate greater uncertainty.
+- **`mad`**: the median absolute deviation, a measure of posterior spread.
+- **`q2.5`** and **`q97.5`**: the 2.5% and 97.5% posterior quantiles. These define the 95% credible interval for the parameter. This basically means that there is a 95% probability that the parameter lies in this interval. 
+- **`rhat`**: the potential scale reduction factor [Gelman & Rubin, 1992](https://projecteuclid.org/journals/statistical-science/volume-7/issue-4/Inference-from-Iterative-Simulation-Using-Multiple-Sequences/10.1214/ss/1177011136.pdf) with which you can identify model convergence across MCMC chains. Values above 1.1 are generally considered problematic and the closer to 1 the better.
+- **`ess_bulk`**. Indicates the sampling efficiency in the bulk of the posterior. It is defined as the effective sample size for rank normalized values using split chains. Higher values indicate more reliable estimation.
+- **`ess_tail`**: Indicates the sampling efficiency in the tails of the posterior. It is defined as the minimum of the effective sample sizes for 5% and 95% quantiles. Low values could suggest poor exploration of the posterior tails. 
+
+
+#### Additional diagnostic checks for model convergence
+```{r}
+#| label: method-dsem-diagnostics
+#| code-fold: false
+mcmc_trace(draws, c("alpha", "beta", "phi", "sigma",
+                               "tau_u[1]", "tau_u[2]", "tau_u[3]",
+                               "tau_u[4]"))
+                               
+mcmc_hist(draws, c("alpha", "beta", "phi", "sigma",
+                             "tau_u[1]", "tau_u[2]", "tau_u[3]",
+                             "tau_u[4]"))
+
+```
+
+From `mcmc_trace` we see that each chain is mixing well (also more informally known as the 'hairy caterpillar plot') and from `mcmc_hist` we see histograms of the posterior draws for each parameter with all chains merged.
+
+
+#### Plot variability estimates
+
+
+```{r}
+#| label: plot-dsem
+#| code-fold: false
+# Extract subject-level innovation SD (exp(sigma + u[,4]))
+u_draws <- fit2$draws(variables = "u", format = "df")
+sigma_draws <- fit2$draws(variables = "sigma", format = "df")
+
+# Reshape u4
+u4 <- u_draws %>%
+  select(.draw, matches("u\\[.*,4\\]")) %>%
+  pivot_longer(-.draw, names_to = "subject", values_to = "u4") %>%
+  mutate(subject = as.integer(gsub("u\\[(\\d+),.*\\]", "\\1", subject)))
+
+# Put in separate df
+post_sd <- u4 %>%
+  left_join(sigma_draws %>% select(.draw, sigma), by = ".draw") %>%
+  mutate(sd = exp(sigma + u4))
+
+# Create summary dataframe of posterior distributions per subject
+sd_summary <- post_sd %>%
+  group_by(subject) %>%
+  summarise(
+    mean = mean(sd),
+    lo = quantile(sd, 0.025),
+    hi = quantile(sd, 0.975),
+    .groups = "drop"
+  )
+
+# Plot results
+ggplot(sd_summary, aes(x = subject, y = mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = 0.2) +
+  labs(
+    title = "Individual differences in residual SD (posterior mean ± 95% CI)",
+    x = "Subject",
+    y = "Residual SD"
+  ) +
+  theme_minimal()
+
+```
+
+See [Aristodemou, M. E. (2025). The temporal instability of cognitive performance (Doctoral dissertation)](https://doi.org/10.54195/9789465151182) for more information on the drawbacks of using simple measures like e.g., iSD and iCV in comparison to DSEM. 
+
+::: {.callout-note}
+Worthwhile attempts have been made across simulation studies to provide researchers with some lower bound estimates for sample size and the amount of timepoints or trials needed in order to obtain reliable DSEM estimates. [Jongerling, Liu & Williams, 2024](https://osf.io/preprints/psyarxiv/5fk8v_v1) describe a multilevel VAR model that includes random covariance matrices and report that the number of trials or timepoints (T) has a bigger effect on parameter reliability compared to number of subjects (N) and recommend a minimum of 200 subjects with 100 observations each. However, [Schultzberg and Muthén 2018](https://doi.org/10.1080/10705511.2017.1392862) report a somewhat opposite finding where a big number of subjects (N) combined with a low number of trials (T) matters more for reliability than a small number of subjects (N) and a high number of trials (T). Specifically, they report a recovery ratio of 0.88 in  trial-by-trial random effects estimation with 200 subjects (N) and 15 observations (T). 
+
+Note that both papers evaluate different model structures (i.e., VAR vs. AR-1) and that both represent simulated scenarios in which the model specification comes from a known and correct data generating process. With real world data, the degree of model misspecification (e.g., non-linearity, non-stationarity etc.) comes into play which in turn impacts the posterior uncertainty of the parameter estimates. 
+
+Taking all together, we would recommend the following numbers to increase the probability for reliable DSEM estimates: 50-100 subjects (N) and 50-100 observations (T), but crucially, only treat these numbers as a starting point under ideal conditions. With lower amounts of subjects or observations, reliability in estimatingindividuals differences might become unstable. However, reliable estimating a DSEM only at the population-level should still be feasible. Complementary to sample- and observation size considerations, the cognitive system under study is a crucial factor to take into account when thinking about these numbers. This is where various model diagnostics become relevant to test whether certain statistical assumptions (e.g., stationarity, measurement error, non-linearity) hold true for a given population under study. Finally, rather than purely relying on recommendations for the number of subjects and observations, researchers can opt to run simulations with their expected effect sizes, type of missing data or relevant parameters to estimate (e.g., only mean + variability or mean + AR) since all of these factors might affect the penultimate reliability in the model estimates. 
+
+Note that different software was used in both studies: [Jongerling, Liu & Williams, 2024](https://osf.io/preprints/psyarxiv/5fk8v_v1) wrote their models in [STAN](https://mc-stan.org/) and fitted them through the R package [CmdStanR](https://mc-stan.org/cmdstanr/), whereas [Schultzberg and Muthén 2018](https://doi.org/10.1080/10705511.2017.1392862) use [Mplus](https://www.statmodel.com/). 
+:::
+
+
+
+## Drift Diffusion Modeling (DDM)
+
+### Description
+
+The Drift Diffusion Model (DDM) is a statistical measure used to model (2-) choice response time data and is generally comprised of 4 parameters.
+
+The drift rate $\delta$ generally reflects how efficient or fast one accumulates evidence, the boundary separation  $\alpha$ reflects the degree of
+response caution, the bias $\beta$ reflects the starting point of evidence
+accumulation, and the non-decision time $\tau$ reflects processes that occur beyond the decision making such as enconding or perceptual and motor
+processing time.
+
+$$
+\text{RT} \sim \text{Wiener}(\delta, \alpha, \beta, \tau)
+$$
+
+Cognitive variability is often operationalized through the drift rate, where higher drift rates generally indicate that evidence is accumulated more consistently which would reflect more precise and accurate cognitive processing. 
+
+::: {.callout-note}
+The DDM code is adapted from the `easyRT` tutorial by @makowski2026easyRT and the model is fit using R-package `brms`. Similar to DSEM, expect some sampling time.
+For a thorough explanation on Drift Diffusion Models we refer to [@makowski2026easyRT].
+The code of `easyRT` is available at: <https://dominiquemakowski.github.io/easyRT>
+:::
+
+
+### Code
+
+In this example, @makowski2026easyRT simulated data for 4 conditions with known 
+parameters and investigated how well these parameters were recovered. For more 
+background information about this dataset, see 
+[here](https://dominiquemakowski.github.io/easyRT/articles/ddm.html).
+
+#### Simulate DDM data
+
+```{r}
+#| label: method-ddm-data
+#| code-fold: false
+# Simulate DDM data. Code from: https://dominiquemakowski.github.io/easyRT/articles/ddm.html
+sim <- ddm_data(n     = c(200, 200, 200, 200),
+                drift = c(-1, 0, 1, 2),
+                bs    = 1,
+                bias  = c(0.4, 0.5, 0.6, 0.7),
+                ndt   = 0.2)
+
+# store in df
+df_ddm <- sim$data
+
+# convert condition to 0, 1, 2, 3 (following easyRT tutorial)
+df_ddm$condition <- as.numeric(df_ddm$condition) - 1
+
+# inspect df
+head(df_ddm)
+```
+
+#### Plot simulated data
+
+```{r}
+#| label: method-ddm-plot-data
+#| code-fold: false
+ddm_plot(sim)
+```
+
+#### Specify model formula, set priors and fit model (following easyRT tutorial)
+```{r}
+#| label: method-ddm-fit
+#| cache: false
+#| code-fold: false
+#| message: false
+#| warning: false
+#| output: false
+# Specify model formula and family
+formula <- bf(rt | dec(response) ~ 0 + Intercept + condition,
+              bias             ~ 0 + Intercept + condition)
+
+family <- wiener(link_bs   = "identity",
+                 link_ndt  = "identity",
+                 link_bias = "identity")
+
+# Specify priors
+prior <- c(
+  prior("student_t(3, 0, 1)",      class = "b", coef = "condition",  dpar = ""),
+  set_prior("student_t(3, 0, 1)",  class = "b", coef = "Intercept",  dpar = ""),
+  set_prior("student_t(3, 0, 0.05)", class = "b", coef = "condition", dpar = "bias"),
+  set_prior("normal(0.5, 0.15)",   class = "b", coef = "Intercept",  dpar = "bias"),
+  set_prior("gamma(1.5, 3)",       class = "ndt", ub = "min_Y"),
+  set_prior("gamma(3, 2)",         class = "bs")
+) |> brms::validate_prior(formula, family = family, data = df_ddm)
+
+# Prepare prior data
+prior_data <- brms:::prepare_print_prior(prior) |> 
+  mutate(ub = ifelse(ub == "min_Y", min(df_ddm$rt), ub),
+         Parameter = ifelse(coef != "", paste0(class, "_", coef), class)
+  ) |> 
+  filter(Parameter != "b") |> 
+  ggdist::parse_dist()  
+
+
+# Initialisation function
+init_func <- function(chain_id = 1) {
+  list(b      = rep(0, 2),
+       b_bias = c(0.5, 0),
+       bs     = 1,
+       ndt    = 0.2)
+}
+
+# Fit model
+m_ddm <- brm(formula,
+             data      = df_ddm,
+             family    = family,
+             prior     = prior,
+             cores     = 4,
+             chains    = 4,
+             warmup    = 500,
+             iter      = 1500,
+             algorithm = "sampling",
+             init      = init_func)
+             
+saveRDS(m_ddm, "m_ddm.rds")
+```
+
+
+### Results
+
+#### Model output
+
+```{r}
+#| label: ddm-modeloutput
+#| code-fold: false
+#| cache: false
+
+m_ddm
+
+```
+
+#### Plot parameter estimates
+
+```{r}
+#| label: plot-ddm
+#| code-fold: false
+#| cache: false
+# Extract and plot parameter estimates
+as.data.frame(m_ddm) |> 
+  select(b_condition_bias = b_bias_condition, b_Intercept_bias = b_bias_Intercept, b_condition, b_Intercept, bs, ndt) |> 
+  datawizard::data_to_long(names_to="Parameter", rows_to = "iter") |> 
+  ggplot(aes(y = Parameter)) +
+  ggdist::stat_halfeye(data = prior_data, aes(xdist = .dist_obj), geom = "slab", n = 10001, normalize="xy") +
+  # ggdist::stat_dotsinterval(aes(x = value, fill = Parameter), color = "black", slab_linewidth = NA, scale = 1, dotsize = 2, normalize = "xy") +
+  ggdist::stat_slabinterval(aes(x = value, fill = Parameter), slab_linewidth = NA, scale = 1, normalize = "xy") +
+  geom_vline(xintercept = 0, linetype = "dashed") + 
+  coord_cartesian(xlim = c(-2.5, 5)) +
+  theme_minimal()
+```
+
+- **`b_Intercept`** — baseline drift rate (when condition = 0)
+- **`b_condition`** — effect of condition on drift rate
+- **`b_Intercept_bias`**— baseline bias (when condition = 0)
+- **`b_condition_bias`** — effect of condition on bias
+- **`bs`** — boundary separation
+- **`ndt`** — non-decision time
+
+::: {.callout-note}
+This DDM estimates population-level parameters. In order to get subject-specific drift rate estimates, like the subject-specific innovations in our DSEM, one would require a multilevel extension with random effects for each subject.
+:::
+
+### Overview of all measures (round 2)
+```{r}
+#| code-fold: false
+
+df.LSME_wider <- df.LSME %>%
+  group_by(subject) %>%
+  summarise(
+    y            = mean(y,            na.rm = TRUE),
+    iSD          = mean(iSD,          na.rm = TRUE),
+    diSD         = mean(diSD,         na.rm = TRUE),
+    iCV          = mean(iCV,          na.rm = TRUE),
+    MSSD         = mean(MSSD,         na.rm = TRUE),
+    MSSD_detrend = mean(MSSD_detrend, na.rm = TRUE),
+    rMSSD        = mean(rMSSD,        na.rm = TRUE),
+    tau          = mean(tau,          na.rm = TRUE),
+    sigma        = mean(sigma,        na.rm = TRUE),
+    mu           = mean(mu,           na.rm = TRUE),
+    lm_sigma     = mean(lm_sigma,     na.rm = TRUE)
+  ) %>%
+  # join DSEM posterior mean SD
+  left_join(sd_summary %>% select(subject, dsem_sd = mean), by = "subject")
+
+df.LSME_wider %>% head() %>% knitr::kable(digits = 2)
+```
+
+### Correlations between measures
+
+```{r}
+#| code-fold: false
+
+GGally::ggpairs(df.LSME_wider[, c("iSD", "diSD", "iCV",
+                                   "MSSD", "MSSD_detrend", "rMSSD",
+                                   "tau", "sigma", "mu",
+                                   "lm_sigma", "dsem_sd")]) +
+  theme(axis.text  = element_text(size = 4),
+        strip.text = element_text(size = 5))
+```
+
+
+## Relative variability indices
+
+[Mestdagh et al., (2018)](https://psycnet.apa.org/buy/2018-15177-001) propose a battery of 'Relative Variability Indices' that aim to circumvent the problem of mean-dependence within some of the traditional variability measures (e.g., SD). Variability is computed in relation to the maximum possible variability conditional on the mean. 
+
+::: {.callout-note}
+Relative Variability measures are suitable for double bounded data (e.g., VAS 0-100), but less suitable if the observed data have no double scale bounds (e.g., response times).
+:::
+
+### Overview of Relative Variability Estimates
+| Variability Estimate | Conceptual Strength | Conceptual Limitation | Suits Data Type |
+|---|---|---|---|
+| **Relative Standard Deviation (iSD)** | Mean-corrected; removes dependency between mean and SD induced by bounded scales | Inflates variability estimates near scale bounds; assumes participants use the entire scale range; participants with mean at bounds should be excluded | Continuous bounded data (e.g., Likert, VAS, ESM affective ratings) |
+| **Relative RMSSD (rRMSSD)** | Mean-corrected; captures temporal instability independent of mean level; suitable for time-ordered data | Inflates estimates near bounds; requires time-ordered observations; conflates autocorrelation with innovations | Time-ordered bounded continuous data (e.g., ESM affective ratings) |
+| **Relative Interquartile Range (rIQR)** | Mean-corrected; robust to outliers compared to SD measures | Inflates estimates near bounds; less sensitive to extreme fluctuations; participants with mean at bounds should be excluded | Continuous bounded data, particularly with skewed distributions |
+| **Relative Range (rR)** | Mean-corrected; captures the full spread of scores relative to what is possible given the mean | Sensitive to outliers and extreme observations; inflates estimates near bounds; based on only two observations (min and max) | Continuous bounded data where entire range is of (theoretical) interest |
+: Overview of Relative Variability estimates, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
+
+
+#### Step 1: Download the source files
+
+Source files for the Relative variability indices in R can be found [here:](https://ppw.kuleuven.be/okp/software/relative_variability/)
+
+#### Step 2: Read in the provided data: ESMData.rda 
+```{r}
+#| label: ESMData
+#| cache: false
+#| eval: true
+#| code-fold: false
+load("ESMData.rda")
+ESMData %>% 
+  dplyr::filter(ID %in% unique(ID)[1:5]) %>% 
+  group_by(ID) %>% 
+  slice_head(n = 5) %>% 
+  knitr::kable()
+
+```
+
+Here we only show the first 5 rows of 5 different subjects, however there are more subject and each subject has more than 5 observations. 
+
+What does each variable reflect?
+
+- **`ID`**: Subject ID number 
+- **`Sad`**: Slider score 
+- **`CESD`**: Depression scale score
+
+
+#### Determine scale bounds
+
+```{r}
+#| label: min-max
+#| code-fold: false
+#| eval: true
+MIN_val <- min(ESMData$Sad, na.rm = TRUE) 
+MAX_val <- max(ESMData$Sad, na.rm = TRUE)
+```
+
+
+#### Step 3: Source the files from the folder you downloaded the source files to and estimate measures
+```{r}
+#| label: relvar-result
+#| code-fold: false
+#| eval: true
+
+source("bestDivision.R")
+source("checkInput.R")
+source("checkOutput.R")
+source("IPR.R")
+source("IQR.R")
+source("maximumIQR.R")
+source("maximumVAR.R")
+source("maximumIPR.R")
+source("maximumRMSSD.R")
+source("maximumMSSD.R")
+source("maximumRANGE.R")
+source("maximumSD.R")
+source("maxMssdGetN.R")
+source("mostLeast.R")
+source("mssdParts.R")
+source("RMSSD.R")
+source("MSSD.R")
+source("RANGE.R")
+source("tryAdd.R")
+source("updateUseFill.R")
+
+# source the relative measures
+source("relativeSD.R")
+source("relativeVAR.R")
+source("relativeIQR.R")
+source("relativeRANGE.R")
+source("relativeRMSSD.R")
+source("relativeMSSD.R")
+
+results <- ESMData %>%
+  group_by(ID) %>%
+  summarise(
+    SD_rel    = relativeSD(Sad,    MIN = MIN_val, MAX = MAX_val),
+    RMSSD_rel = relativeRMSSD(Sad, MIN = MIN_val, MAX = MAX_val),
+    IQR_rel   = relativeIQR(Sad,   MIN = MIN_val, MAX = MAX_val),
+    RANGE_rel = relativeRANGE(Sad, MIN = MIN_val, MAX = MAX_val)
+  )
+```
+
+The relative SD formula is:
+$$
+\text{RSD}_i^* = \frac{\sigma_{y_i}}{\sigma_{\max}(\bar{y}_i, \text{MIN}, \text{MAX}, T_i)}
+$$
+
+where
+
+$$
+\sigma_{y_i} = \sqrt{\frac{1}{T_i-1}\sum_{t=1}^{T_i}(y_{it} - \bar{y}_i)^2}
+$$
+
+and $\sigma_{\max}$ is the maximum possible standard deviation given the observed 
+mean $\bar{y}_i$, the bounds $[\text{MIN}, \text{MAX}]$, and sample size $T_i$.
+
+$$
+\text{RSD}_i^* = \begin{cases} 
+\dfrac{\sigma_{y_i}}{\sigma_{\max}} & \text{if } \sigma_{\max} \neq 0 \\ 
+\text{NaN} & \text{if } \sigma_{\max} = 0 
+\end{cases}
+$$
+
+
+The relative rMSSD formula is:
+
+$$
+\text{rMSSD}_i^* = \frac{\text{rMSSD}_i}{\sigma_{\max}(\bar{y}_i, \text{MIN}, \text{MAX}, \mathbf{T})}
+$$
+
+where
+
+$$
+\text{rMSSD}_i = \sqrt{\frac{1}{T_i - 1} \sum_{t=1}^{T_i - 1} (y_{i,t+1} - y_{it})^2}
+$$
+
+and $\sigma_{\max}$ is the maximum possible rMSSD given the observed mean 
+$\bar{y}_i$, the bounds $[\text{MIN}, \text{MAX}]$, and the segment lengths 
+$\mathbf{T} = (T_1, T_2, \ldots)$.
+
+$$
+\text{rMSSD}_i^* = \begin{cases} 
+\dfrac{\text{rMSSD}_i}{\sigma_{\max}} & \text{if } \sigma_{\max} \neq 0 \\ 
+\text{NaN} & \text{if } \sigma_{\max} = 0 
+\end{cases}
+$$
+
+
+The relative IQR formula is:
+
+$$
+\text{IQR}_i^* = \frac{\text{IQR}_i}{\sigma_{\max}(\bar{y}_i, \text{MIN}, \text{MAX}, T_i)}
+$$
+
+where
+
+$$
+\text{IQR}_i = Q_{0.75}(y_i) - Q_{0.25}(y_i)
+$$
+
+and $\sigma_{\max}$ is the maximum possible IQR given the observed mean 
+$\bar{y}_i$, the bounds $[\text{MIN}, \text{MAX}]$, the sample size $T_i$, 
+and the quartile positions $T_1 = \lceil T_i \cdot 0.25 \rceil$ and 
+$T_2 = \lceil T_i \cdot 0.75 \rceil$.
+
+$$
+\text{IQR}_i^* = \begin{cases} 
+\dfrac{\text{IQR}_i}{\sigma_{\max}} & \text{if } \sigma_{\max} \neq 0 \\ 
+\text{NaN} & \text{if } \sigma_{\max} = 0 
+\end{cases}
+$$
+
+
+The relative Range formula is:
+
+$$
+\text{R}_i^* = \frac{R_i}{\max(R_i \mid \bar{y}_i)}
+$$
+
+where
+
+$$
+R_i = \max(y_i) - \min(y_i)
+$$
+
+and $\max(R_i \mid \bar{y}_i)$ is the maximum possible range given the observed 
+mean $\bar{y}_i$, the bounds $[\text{MIN}, \text{MAX}]$, the sample size $T_i$, 
+and the positions $T_1 = 1$ and $T_2 = T_i$.
+
+$$
+\text{R}_i^* = \begin{cases} 
+\dfrac{R_i}{\max(R_i \mid \bar{y}_i)} & \text{if } \max(R_i \mid \bar{y}_i) \neq 0 \\ 
+\text{NaN} & \text{if } \max(R_i \mid \bar{y}_i) = 0 
+\end{cases}
+$$
+
+#### Results
+
+```{r}
+#| label: plot-relvar
+#| code-fold: false
+#| eval: true
+
+results %>%
+  pivot_longer(-ID, names_to = "estimate", values_to = "value") %>%
+  group_by(estimate) %>%
+  mutate(m = mean(value, na.rm = TRUE)) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = 0.8) +
+  geom_vline(aes(xintercept = m), linetype = "dashed") +
+  geom_text(aes(x = m, y = Inf,
+                label = paste0("M = ", round(m, 2))),
+            hjust = -0.1, vjust = 2, size = 3.2, check_overlap = TRUE) +
+  facet_wrap(~estimate, scales = "free_x") +
+  theme_minimal() +
+  labs(title = "Distribution of relative variability estimates",
+       x = NULL, y = "Count")
+
+```
+
+#### Correlations between relative variability estimates
+
+```{r}
+#| code-fold: false
+
+GGally::ggpairs(results[, c("SD_rel", "RMSSD_rel", "IQR_rel", "RANGE_rel")]) +
+  theme(axis.text  = element_text(size = 5),
+        strip.text = element_text(size = 5))
+```
+
+## Binary variability measures
+
+A final extension of this tutorial concerns measures that are specifically tailored to estimate variability in binary data. Most measures discussed earlier are suitable for continuous (e.g., response time) data, but cannot or are limited in their ability to capture dynamics in accuracy data.  
+
+
+### Overview of variability measures for binary data
+| Variability Estimate | Conceptual Strength | Conceptual Limitation | Suits Data Type |
+|---|---|---|---|
+| **Binary Autocorrelation** | Easy to compute | Assumes stationarity | Binary (0/1) data |
+| **Sequential Error and Correct Dependency** | Easy to compute, standardized | Assumes stationarity | Binary (0/1) data |
+| **Binary Mean Square of Successive Differences (binMSSD)** | Easy to compute, standardized | Conflates autocorrelation with innovations and systematic changes | Binary (0/1) data |
+| **Windowed Variance** | Easy to compute, standardized | (Arbitrary) window size choice | Binary (0/1) data | 
+: Overview of Binary variability estimates, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
+
+We applied a 'standardization' procedure to each measure which allows for inter-measure comparisons of variability in binary data. All measures discussed below (except for the autocorrelation) are reported in standardized estimates. 
+
+With very large datasets, the computation of these measures can take some time (it isn't "instant," so to speak), because we need to calculate the minimum, maximum, predicted value, etc., for each standardized value. In other words, the standardization procedure slightly increases the computation time.
+
+First we load the required R packages and simulate two datasets: (1) a random simulated and (2) a more realistic binary time-series reflecting more common dynamics. 
+
+#### Set up
+
+##### Load R packages
+
+```{r}
+#| label: bivar-source
+#| code-fold: false
+#| eval: true
+
+## load packages
+library(psych)
+library(stats)
+library(ggplot2)
+library(reshape2)
+
+source("PlotMeasures_Function.R") #required for some plotting functions
+source("BinVar_Functions.R") #same functions as illustrated in the code blocks below
+
+# For the MSSD, sequential streakiness, and windowed SD, a "standardization procedure" is performed. The functions will output the standardized value by default; it is also possible to specify that you want the "raw" or partly standardized values (see the Bivar_Functions.R script for more information). The functions accept data frames with a time series per row as input. The output is a vector or a data frame with values.
+
+```
+
+
+##### Two simulated data
+Here, we simulate two data sets to illustrate the behaviour of the measures: 
+the first data set consists of fully random time series, which is useful for 
+checking the successful standardization of the measures:
+
+```{r}
+#| label: random-simulation
+#| code-fold: false
+
+set.seed(1108)
+
+# create a probabilities matrix with proportions 0 to 1 (101 in total)
+probs = matrix(nrow = 101, ncol = 100)
+probs[1,]   = rep(0, 100)
+probs[101,] = rep(1, 100)
+for (p in 1:99) {probs[p+1,] = c(rep(1, p), rep(0, (100-p)))}
+
+# sample each probabilities row 1000 times
+# this ensures exactly the same number of time series per proportion correct
+# (as opposed to probabilistic sampling)
+ran_simdat = matrix(nrow = 101000, ncol = 100)
+for (row in 1:nrow(ran_simdat)) {
+  ind = rep(1:101, 1000)
+  ran_simdat[row,] = sample(probs[ind[row],])
+}
+
+# create vector with proportions correct
+ran_p = rowMeans(ran_simdat)
+```
+
+The second simulated data set aims to integrate some more realistic dynamics 
+in the data, to show which types of dynamics are captured by the binary 
+variability measures. In order to do this, we first create centered continuous 
+time series with different means, autocorrelations, and (polynomial or linear) 
+trends. Next, we dichotomize the time series.
+
+```{r}
+#| label: real-simulation
+#| code-fold: false
+
+# set seed
+set.seed(1108)
+
+# generate range of means
+p_means = seq(.30, .90, length.out = 100)
+z_means = qnorm(p_means)
+z_means_input = rep(z_means, 100)
+
+# generate range of autocorrelations
+acs = seq(-.30, .90, length.out = 100)
+acs_input = rep(acs, 100)
+
+# simulate time series
+cont_simdat = matrix(nrow = 10000, ncol = 100)
+for (row in 1:10000) {cont_simdat[row,] <- 
+  suppressWarnings(arima.sim(list(ar = acs_input[row], ma = 0), n = 100) + 
+  z_means_input[row])}
+
+# generate range of linear trends
+lins =  seq(-.005, .005, length.out = 100)
+lins_input = rep(lins, 40)
+
+# generate range of quadratic trends
+quads = seq(-.0005, .0005, length.out = 100)
+quads_input = rep(quads, 30)
+
+# generate range of cubic trends
+cubics = seq(-.00005, .00005, length.out = 100)
+cubics_input = rep(cubics, 30)
+
+# create centered time variable
+t   <- 1:100
+t_c <- t - mean(t)
+
+# create trend matrix and add linear, quadratic, and cubic trends
+trend_simdat = matrix(nrow = 10000, ncol = 100)
+trend_simdat[1:4000,] = cont_simdat[1:4000,] + outer(lins_input, t_c)      
+trend_simdat[4001:7000,] = cont_simdat[4001:7000,] + outer(quads_input, t_c^2)   
+trend_simdat[7001:10000,] = cont_simdat[7001:10000,] + outer(cubics_input, t_c^3)   
+
+# dichotomize
+real_simdat = ifelse(trend_simdat<0, 0, 1)
+```
+
+
+##### Binary autocorrelation
+
+Contrary to the autocorrelation in continuous data, the autocorrelation in binary data indicates the degree to which (in-)correct responses are to be followed by another (in-)correct response. 
+
+The binary autocorrelation is defined as: 
+
+$$
+\text{binAC}_{\text{raw}} = \text{cor}(y_t, y_{t-k})
+$$
+
+and is a priori not 'contaminated' through mean-dependency, making it the only measure where the raw estimate can be used [Schmiedek et al., (2020)](https://doi.org/10.7717/peerj.9290).
+
+The autocorrelation is essentially a correlation of a time series with 
+its lagged counterpart. Say we have the following binary time series:
+
+$$ts = \lbrace 1,1,1,0,1,0,0,1,1,0 \rbrace$$
+
+We first have to center the time series, i.e. subtract its mean (which is .6):
+
+$$ts_c = \lbrace .4, .4, .4, -.6, .4, -.6, -.6, .4, .4, -.6 \rbrace$$
+
+Next, we can construct a "main" time series and a lagged counterpart. 
+For an autocorrelation with lag $k = 1$, and the length of the full 
+time series $T = 10$, we take $ts_c[1:(T-k)]$ as the main time series, 
+and $ts_c[(1+k):T]$ as the lagged time series:
+
+$$ts_{\text{main}} = ts_c[1:9] = \lbrace .4, .4, .4, -.6, .4, -.6, -.6, .4, .4 \rbrace$$
+
+$$ts_{\text{lag}} = ts_c[2:10] = \lbrace .4, .4, -.6, .4, -.6, -.6, .4, .4, -.6 \rbrace$$
+
+We can now compute the covariance of these two time series, and divide 
+it by the variance of the full time series. Note that this is the 
+standard procedure for computing autocorrelations, which diverges from 
+that of standard correlations:
+
+$$\text{binAC} = \frac{(ts_{\text{main}} \cdot ts_{\text{lag}})/n}{(ts_c)^2/n}$$
+
+###### Function
+
+Click "show" to view the implementation of the binary autocorrelation computation in R
+
+```{r}
+#| label: binAC-function
+#| code-fold: true
+#| code-summary: "show"
+
+binAC = 
+  # input time series, specify lag k (optional)
+  function(ts, k=1) {
+  n = length(ts)
+  
+  # center ts
+  ts_c = ts - mean(ts)
+  
+  # compute covariance between the main and lagged ts; 
+  # note we do not divide the cov and var by n as they cancel each other out 
+  cov = sum(ts_c[(1+k):n]*ts_c[1:(n-k)])
+  
+  # compute variance of the complete ts
+  var = sum(ts_c^2)
+  
+  # compute autocorrelation and return
+  AC = cov / (var)
+  return(AC)
+}
+```
+
+
+#### A working example
+
+Let's compute the binary autocorrelation in our simulated data set. Note that 
+the `binAC` function requires a single data row as input, so we write a loop 
+to go through the data set and save the results in a vector.
+
+```{r}
+#| label: binAC-application
+#| code-fold: false
+#| fig-keep: all
+
+# compute binAC in random data set
+binAC_ran <- vector()
+for (row in 1:nrow(ran_simdat)) {binAC_ran[row] <- binAC(ran_simdat[row,], k=1)}
+
+# view distribution, compute mean and correlation with mean proportion correct
+hist(binAC_ran)
+t.test(binAC_ran, na.rm = T)
+cor.test(binAC_ran, ran_p)
+
+# note that the autocorrelations show a slight negative small-sample bias,
+# which disappears for longer time series:
+long_simdat = matrix(NA, 100, 100000)
+for (row in 1:nrow(long_simdat)) {long_simdat[row,] = sample(c(1,0), 1000, replace = T)}
+long_binAC_ran <- vector()
+for (row in 1:nrow(long_simdat)) {long_binAC_ran[row] <- binAC(long_simdat[row,], k=1)}
+mean(long_binAC_ran)
+
+# compute in the realistic data set and plot example trajectories
+binAC_real <- vector()
+for (row in 1:nrow(real_simdat)) {binAC_real[row] <- binAC(real_simdat[row,])}
+plot_meas(real_simdat, binAC_real, "Binary autocorrelation")
+```
+
+
+### Binary Mean Squared Successive Difference
+
+For a time series of length $T$, where $y$ represents the score on trial $t$,
+the "raw" binMSSD represents the mean squared difference from trial to trial:
+
+$$\text{binMSSD}_{\text{raw}} = \frac{\displaystyle\sum_{t=1}^{T-1} (y_{t+1} - y_t)^2}{T-1}$$
+
+In order to range-standardize the binMSSD, we have to compute the theoretical 
+minimum and maximum value for a given proportion correct. The minimum binMSSD 
+value can be quite easily conceived: first, when there are only error and correct 
+responses, the binMSSD is 0. For any combination of error and correct responses, 
+we only need 1 transition if all correct and error responses are clustered. In 
+that case, the minimum binMSSD is computed as follows:
+
+$$\text{binMSSD}_{\text{min}} = \frac{1}{T-1}$$
+
+The reasoning behind the maximum possible binMSSD is somewhat more complex. 
+Essentially, we need to compute the maximum number of ups and downs possible 
+given the length of the time series and the number of correct and incorrect 
+responses. This maximum is greatest when the number of errors and correct 
+responses is equal: then the time series can go up and down continuously. In 
+other cases, the maximum is limited by the number of error or correct responses, 
+depending on which of those two is the lowest.
+
+For example, say we have a time series of 100 trials, with 15 errors. The maximum 
+binMSSD time series corresponds to a time series where the 15 errors appear 
+isolated, creating $15 \times 2 = 30$ "ups and downs" in the data. So the maximum 
+is either 1, or computed as follows:
+
+$$\text{binMSSD}_{\text{max}} = \frac{2 \times \min(n_{\text{correct}}, n_{\text{incorrect}})}{T-1}$$
+
+Now, using the minimum and maximum binMSSD values, we can compute the 
+range-standardized binMSSD:
+
+$$\text{binMSSD}_{\text{rs}} = \frac{\text{binMSSD}_{\text{raw}} - \text{binMSSD}_{\text{min}}}{\text{binMSSD}_{\text{max}} - \text{binMSSD}_{\text{min}}}$$
+
+We also have to apply the residualization step, for which we need to compute the 
+expected binMSSD value in a random time series. For some time series with a given 
+$p$, the probability of a transition from a 0 to a 1 or vice versa is equal to 
+$p \cdot (1-p) + (1-p) \cdot p$. The number of expected transitions equals this 
+probability times the total number of trials, divided by the number of possible 
+transitions, $T-1$. Thus, the expected binMSSD becomes:
+
+$$\text{binMSSD}_{\text{exp}} = \frac{(p \cdot (1-p) + (1-p) \cdot p) \cdot T}{T-1} = \frac{2 \cdot p \cdot (1-p) \cdot T}{T-1}$$
+
+We can now range-standardize the expected binMSSD, and use the expected 
+range-standardized binMSSD value to compute a final standardized binMSSD score:
+
+$$\text{binMSSD}_{\text{exp-rs}} = \frac{\text{binMSSD}_{\text{exp}} - \text{binMSSD}_{\text{min}}}{\text{binMSSD}_{\text{max}} - \text{binMSSD}_{\text{min}}}$$
+
+
+$$\text{binMSSD}_{\text{std}} = \text{binMSSD}_{\text{rs}} - \text{binMSSD}_{\text{exp-rs}}$$
+
+#### Function
+
+Click "show" to view the implementation of the binary binMSSD computation in an R function.
+
+```{r}
+#| label: binMSSD-function
+#| code-fold: true
+#| code-summary: "show"
+
+# Input time series, specify output
+# The default output is "standardized"
+# Other options for output are: "raw", "rangestd"
+binMSSD = function(ts, output="standardized") {
+  
+  # checks whether the ts includes missing data and returns error message if so
+  if (sum(is.na(ts)) > 0) 
+  {stop("Data includes missingness; please input a data set without missing values")}
+  
+  # compute raw binMSSD, 
+  binMSSD_raw = mssd(ts)
+  
+  # return if output="raw"
+  if (output == "raw")
+  {return(binMSSD_raw)}
+  
+  # compute n correct, p correct, total n trials, n incorrect
+  n_cor = sum(ts)
+  n = length(ts)
+  p = n_cor/n
+  n_err = n - n_cor
+  
+  # max binMSSD: max number of transitions
+  binMSSD_max = min(2*min(n_cor, n_err), (n-1)) / (n-1)
+  
+  # min binMSSD: either 1 or 0 transitions
+  binMSSD_min = ifelse(n_cor < (n-1) & n_cor > 1, 1/(n-1), 0)
+  
+  # compute binMSSD_rangestd
+  binMSSD_rangestd  = (binMSSD_raw - binMSSD_min) / (binMSSD_max - binMSSD_min)
+  
+  # return if output = "rangestd"
+  if (output == "rangestd")
+  {return(binMSSD_rangestd)}
+  
+  # compute expected binMSSD
+  exp_binMSSD = 2*var(ts)
+  
+  # compute rangestandardized expected binMSSD
+  binMSSD_rangestd_exp = (exp_binMSSD - binMSSD_min) / (binMSSD_max - binMSSD_min)
+  
+  # compute standardized binMSSD
+  binMSSD_std = binMSSD_rangestd - binMSSD_rangestd_exp 
+  return(binMSSD_std)}
+```
+
+#### A working example
+
+```{r}
+#| label: binMSSD-application
+#| code-fold: false
+#| fig-keep: all
+
+# compute binMSSD
+binMSSD_ran <- vector()
+for (row in 1:nrow(ran_simdat)) {binMSSD_ran[row] <- binMSSD(ran_simdat[row,])}
+
+# view distribution and mean
+hist(binMSSD_ran)
+t.test(binMSSD_ran, na.rm = T)
+cor.test(binMSSD_ran, ran_p)
+
+# compute in the realistic data set and plot example trajectories
+binMSSD_real <- vector()
+for (row in 1:nrow(real_simdat)) {binMSSD_real[row] <- binMSSD(real_simdat[row,])}
+plot_meas(real_simdat, binMSSD_real, "Binary MSSD")
+```
+
+
+
+### Sequential Error and Correct Dependency (SED)
+
+Next to the overall streakiness in a binary time-series (i.e., autocorrelation) one could be interested in the separating the overall autocorrelation into a measure that describes the degree of correct and / or error streakiness.
+
+For instance, correct streakiness could be of interest when studying levels of attentiveness whereas error streakiness could be studied when interested in post error behavior.
+
+The measure reported here is the Range standardized residualized SED and is derived from the following process:
+
+For the raw SED, we compute the probability of an error being followed by 
+another error:
+
+$$SED_{\text{raw}} = P(y_t=0 \mid y_{t-1}=0)$$
+
+Next, we compute the extra SED, reflecting the probability of an error 
+following an error beyond the baseline probability of an error, $1-p$:
+
+$$SED_{\text{ex}} = SED_{\text{raw}} - (1-p)$$
+
+In order to compute the range-standardized SED, we again need to derive the 
+maximum and minimum possible extra SED values. First, a maximum SED is obtained 
+when all errors follow each other; in that case, $SED_{\text{raw}} = P(y_t=0 \mid y_{t-1}=0)$ 
+simply equals 1, and thus the maximum extra SED is equal to:
+
+$$SED_{\text{ex,max}} = 1 - (1-p)$$
+
+The minimum possible SED is somewhat more complex to derive. In case the number 
+of errors does not exceed $\frac{T+1}{2}$, there is enough room for "gaps" in 
+between all of the errors, resulting in a minimum SED of 0. When the number of 
+errors exceeds this number, there are a number of error trials necessarily 
+following each other. In that case, the minimum number of trials following each 
+other is $n_{\text{err}} - n_{\text{cor}} - 1$. Here, the minimum extra SED can be computed as:
+
+$$SED_{\text{ex,min}} = \frac{n_{\text{err}} - n_{\text{cor}} - 1}{n_{\text{err}} - 1} - (1-p)$$
+
+Where the $n_{err} - 1$ term turns the number of subsequent trials into a 
+proportion of subsequent trials. The $-1$ in all these formulas represents the 
+last trial, which does not need a gap because there is no trial following it. 
+Now, the range-standardized SED can be computed as follows:
+
+$$SED_{\text{rs}} = \frac{SED_{\text{ex}} - SED_{\text{ex,min}}}{SED_{\text{ex,max}} - SED_{\text{ex,min}}}$$
+
+Finally, we residualize the range-standardized value by subtracting the expected 
+range-standardized score, resulting in a standardized SED value:
+
+$$SED_{\text{std}} = SED_{\text{rs}} - \frac{0 - SED_{\text{ex,min}}}{SED_{\text{ex,max}} - SED_{\text{ex,min}}}$$
+
+::: {.callout-note}
+The formulas for the correct sequential dependency are the (semantic) contrary of the error version.
+:::
+
+#### Function
+
+Click "show" to view the implementation of the SED and SCD computation in an R function.
+
+```{r}
+#| label: SED-SCD-functions
+#| code-fold: true
+#| code-summary: "show"
+
+# Input time series, specify output
+# The default output is "standardized"
+# Other options for output are: "raw", "extra", "rangestd"
+SED <- function(ts, output="standardized") {
+  
+  # checks whether the ts includes missing data and returns error message if so
+  if (sum(is.na(ts)) > 0) 
+  {stop("Data includes missingness; please input a data set without missing values")}
+  
+  # compute n correct, total n trials, p correct,  and n errors
+  n_cor = sum(ts)
+  n = length(ts)
+  p = n_cor / n 
+  n_err = n - n_cor
+  
+  # T/F ts denoting succeeding same trials
+  same_next <- ts[-length(ts)] == ts[-1]  
+  
+  # count nr of succeeding errors
+  suc_err <- sum(ts[-length(ts)] == 0 & same_next)
+  
+  # compute raw SED; returns NA if n errors = 0
+  SED_raw <- if (n_err > 0) {suc_err / (n_err-1)} else NA
+  if (output=="raw") {return(SED_raw)}
+  
+  # compute extra SED: probability of succeeding errors beyond base rate
+  SED_ex <- SED_raw - (1-p)
+  if (output=="extra") {return(SED_ex)}
+  
+  # compute maximum extra SED
+  maxSED_ex = 1 - (1-p)
+  
+  # compute minimum extra SED
+  if (n_err < ((n+1)/2) ) {minSED_ex = 0 - (1-p)}
+  minSED_ex = ((n_err - n_cor - 1) / (n_err - 1)) - (1-p)
+  
+  # compute range-standardized SED
+  SED_rangestd = (SED_ex - minSED_ex) / (maxSED_ex - minSED_ex)
+  if (output=="rangestd") {return(SED_rangestd)}
+  
+  #compute standardized SED and return
+  SED_std = SED_rangestd - ((0 - minSED_ex) / (maxSED_ex - minSED_ex))
+  return(SED_std)} 
+
+# The SCD is exactly the same function, with correct responses replacing errors
+SCD <- function(ts, output="standardized") {
+  
+  # checks whether the ts includes missing data and returns error message if so
+  if (sum(is.na(ts)) > 0) 
+  {stop("Data includes missingness; please input a data set without missing values")}
+  
+  # compute n correct, total n trials, p correct,  and n errors
+  n_cor = sum(ts)
+  n = length(ts)
+  p = n_cor / n 
+  n_err = n - n_cor
+  
+  # T/F ts denoting succeeding same trials
+  same_next <- ts[-length(ts)] == ts[-1]  
+  
+  # count nr of succeeding errors
+  suc_cor <- sum(ts[-length(ts)] == 1 & same_next)
+  
+  # compute raw SCD; returns NA if n errors = 0
+  SCD_raw <- if (n_cor > 0) {suc_cor / (n_cor-1)} else NA
+  if (output=="raw") {return(SCD_raw)}
+  
+  # compute extra SCD: probability of succeeding errors beyond base rate
+  SCD_ex <- SCD_raw - p
+  if (output=="extra") {return(SCD_ex)}
+  
+  # compute maximum extra SCD
+  maxSCD_ex = 1 - p
+  
+  # compute minimum extra SCD
+  if (n_cor < ((n+1)/2) ) {minSCD_ex = 0 - p}
+  minSCD_ex = ((n_cor - n_err - 1) / (n_cor - 1)) - p
+  
+  # compute range-standardized SCD
+  SCD_rangestd = (SCD_ex - minSCD_ex) / (maxSCD_ex - minSCD_ex)
+  if (output=="rangestd") {return(SCD_rangestd)}
+  
+  #compute standardized SCD and return
+  SCD_std = SCD_rangestd - ((0 - minSCD_ex) / (maxSCD_ex - minSCD_ex))
+  return(SCD_std)} 
+
+```
+
+
+#### A working example
+
+```{r}
+#| label: SED-application
+#| code-fold: false
+#| fig-keep: all
+
+# compute SED
+SED_ran <- vector()
+for (row in 1:nrow(ran_simdat)) {SED_ran[row] <- SED(ran_simdat[row,])}
+
+# view distribution and mean
+hist(SED_ran)
+t.test(SED_ran, na.rm = T)
+cor.test(SED_ran, ran_p)
+
+# compute in the realistic data set and plot example trajectories
+SED_real <- vector()
+for (row in 1:nrow(real_simdat)) {SED_real[row] <- SED(real_simdat[row,])}
+plot_meas(real_simdat, SED_real, "Sequential error dependency")
+```
+
+### Windowed Variance
+
+While we cannot compute a meaningful variance over binary data, we can break up 
+the time series in a set of windows and compute a variance over the means of 
+these windows. Say we have a time series of length $T$, and use a window size 
+$w$. We can compute the number of windows of size $w$ that fit into a time 
+series of length $T$ using integer division:
+
+$$f = \lfloor T / w \rfloor$$
+
+We only keep the trials that are part of a full window, which means all trials 
+in the remainder of the time series are discarded. Next, we can compute a mean 
+for each of the $f$ full windows in our time series. The windowed variance is 
+computed as the variance of the set of window means:
+
+$$\text{winVar}_{\text{raw}} = \frac{\sum_{j=1}^{f} (\bar{y}_{j} - \bar{\bar{y}})^2}{f-1}$$
+Where $\bar{\bar{x}}$ represents the mean over the window means, which means it 
+does not include the trials in the remainder. We can imagine alternative 
+procedures for computing the windowed variance, such as a procedure where the 
+remainder trials are counted as an extra remainder window. However, including 
+such a remainder window would make the standardization of the measure much more 
+complex. This means that, whenever the time series length is not a multiple of 
+the window size, some trials will not be included in the computation.
+
+We can residualize the raw windowed variance by subtracting the expected windowed 
+variance. We know that in a binary time series with proportion correct $p$, the 
+variance is equal to $p \cdot (1-p)$. Now, when we cut up the binary time series 
+into windows, we are "tempering" the variance, as each window mean tends towards 
+the global mean with increasing window size. We can also understand each window 
+as a sample from the full time series, where we are interested in the sampling 
+variance across windows. Given that we know the "population variance", i.e. the 
+variance of the full time series, the expected variance across windows is equal 
+to $\text{Var}(y_{\text{full}}) / w$, which is the variance of the full time series 
+divided by the window size.
+
+Now we still need the maximum and minimum possible windowed variances. For the 
+maximum variance, we need the contrasts between windows to be as large as 
+possible. This comes down to reordering the time series so that the first part 
+contains all the 1s, and the second part contains all the 0s. This results in 
+at least $f-1$ windows containing either only 1s, or only 0s.
+
+For the minimum variance, we want all window means to be as close together as 
+possible. For this, we have to perform integer division on the number of correct 
+trials, $k$, and the window size. Say that $k = 83$ and $w = 10$ for a time 
+series of length $T = 100$; then $k/w$ results in 8 with a remainder of 3. This 
+means we need 3 windows with $8+1=9$ correct trials, and $f-3 = 7$ windows with 
+8 correct trials. When the remainder is 0, all windows have an equal amount of 
+trials, resulting in a variance of 0.
+
+Finally, we can range-standardize both the raw and the expected windowed variance 
+and subtract them, which results in a standardized windowed variance.
+
+
+#### Function
+
+Click "show" to view the implementation of the windowed variance computation in an R function.
+
+```{r}
+#| label: winVar-function
+#| code-fold: true
+#| code-summary: "show"
+
+# Main function
+# Input time series, specify output
+# The default output is "standardized"
+# Other options for output are: "raw", "range-std"
+# main function for computing raw, range-std, and standardized windowed variance
+winVar = function(ts, output = "standardized", w = 10) {
+  
+  # deletes NAs at the end of the ts
+  ts <- if (all(is.na(ts))) NA else ts[seq_len(max(which(!is.na(ts))))]
+  
+  # checks whether the ts include missing data and returns error message if so
+  if (sum(is.na(ts)) > 0) 
+  {stop("Data includes missingness; please input a data set without missing values")}
+  
+  # compute number of full windows that fit into the ts, cut off remaining trials
+  f = length(ts) %/% w # nr of full windows of length w
+  ts_full = ts[1:(w*f)] # ts with full windows
+  k = sum(ts_full) # nr of 1s
+  n_full = length(ts_full)
+  
+  # compute raw windowed variance; return if output == "raw"
+  raw_winVar = winVar_raw(ts_full, w, f)
+  if (output == "raw") {return(raw_winVar)}
+  
+  # compute predicted variance
+  # note: we use var(ts)/w instead of (p* (1-p)/w for consistency)
+  pred_Var = var(ts_full) / w
+  
+  # compute min and max; compute range-standardized measure
+  max_var = (winVar_max(ts_full, k, w, f))
+  min_var = (winVar_min(ts_full, f, k, w))
+  range_var = round(max_var - min_var, digits = 10)
+  winVar_std = ((raw_winVar - min_var) / range_var) 
+  if (output == "range-std") return(winVar_std)
+  
+  # compute standardized variance
+  winVar_res = winVar_std - ((pred_Var - min_var) / range_var)
+  return(winVar_res)
+}
+
+# helper function to compute raw windowed variance
+winVar_raw = function(ts_full, w, f) {
+  
+  # create vector for saving window means, compute means for the full windows
+  w_means = vector() 
+  for (win in 1:f) { ind = (win-1)*w+1
+  w_means[win] = mean(ts_full[ind:(ind+w-1)])}
+  # compute the variance over the means and return
+  raw_var = var(w_means)
+  return(raw_var)
+}
+
+# helper function for computing the minimum winVar
+winVar_min <- function(ts_full, f, k, w) {
+  spr = k %/% f
+  rem = k %% f
+  if (rem == 0) {return(0)}
+  else {
+    counts = c(rep(spr+1, rem), rep(spr, (f-rem)))
+    min_ts = unlist(lapply(counts, function(cn) c(rep(1, cn), rep(0, w - cn))))
+    return(winVar_raw(min_ts, w, f))  
+  }
+}
+
+# helper function for computing the maximum winVar
+winVar_max <- function(ts_full, k, w, f) {
+  max_ts = c(rep(1,k), rep(0, length(ts_full)-k))
+  return(winVar_raw(max_ts, w, f))
+}
+
+```
+
+#### A working example
+
+```{r}
+#| label: winVar-application
+#| code-fold: false
+#| fig-keep: all
+
+# compute winVar
+winVar_ran <- vector()
+for (row in 1:nrow(ran_simdat)) {winVar_ran[row] <- winVar(ran_simdat[row,])}
+
+# remove non-finite values before testing
+winVar_ran_clean <- winVar_ran[is.finite(winVar_ran)]
+ran_p_clean      <- ran_p[is.finite(winVar_ran)]
+
+# view distribution and mean
+ggplot(data.frame(x = winVar_ran_clean), aes(x = x)) +
+  geom_histogram(bins = 200, fill = "#4C72B0", colour = "white", alpha = .8) +
+  labs(title = "Distribution of windowed variance (random data)",
+       x = "winVar", y = "Count") +
+  theme_minimal()
+
+t.test(winVar_ran_clean)
+cor.test(winVar_ran_clean, ran_p_clean)
+
+# note that the t-test and correlation are significant due to a minority of 
+# extreme values from time series with very extreme proportions correct. 
+# The effect disappears when excluding the most extreme proportions:
+sel_p          <- seq(.02, .98, by = .01)
+winVar_ran_sel <- winVar_ran_clean[ran_p_clean %in% sel_p]
+ran_p_sel      <- ran_p_clean[ran_p_clean %in% sel_p]
+
+ggplot(data.frame(x = winVar_ran_sel), aes(x = x)) +
+  geom_histogram(bins = 100, fill = "#4C72B0", colour = "white", alpha = .8) +
+  labs(title = "Distribution of windowed variance (excluding extreme p)",
+       x = "winVar", y = "Count") +
+  theme_minimal()
+
+t.test(winVar_ran_sel)
+cor.test(winVar_ran_sel, ran_p_sel)
+# once the two most extreme proportions correct (.01 and .99) are excluded,
+# both the t-test and correlation become non-significant as expected for 
+# random data
+
+# compute in the realistic data set and plot example trajectories
+winVar_real <- vector()
+for (row in 1:nrow(real_simdat)) {winVar_real[row] <- winVar(real_simdat[row,])}
+plot_meas(real_simdat, winVar_real, "Windowed variance")
+```
+
+Note that the distribution is somewhat skewed. The reason for this is that the 
+lower bound is stronger than the upper bound for random data: the expected 
+windowed variance for a random time series is closer to the theoretical minimum 
+than to the maximum value, which is why the distribution is "cut off" at the 
+left end.
+
+
+The large bar at the left side of the distribution is an artifact resulting from 
+extreme proportions correct and limited time series length. Fold out the code 
+block below for a more detailed explanation.
+
+```{r}
+#| label: winVar-large-bar
+#| code-fold: false
+#| fig-keep: all
+
+# the large bar of winVar values below -.09 belongs to time series with 
+# extreme proportions correct
+ggplot(data.frame(x = ran_p[winVar_ran < -.09]), aes(x = x)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  labs(title = "Proportions correct for winVar < -.09",
+       x = "Proportion correct", y = "Count") +
+  theme_minimal()
+
+# for p = .50 the distribution shows a similar skew as the full distribution.
+# the skew exists because time series can deviate from 0 in the positive 
+# direction by extreme clustering of 1s and 0s, while negative deviations 
+# are limited because the expected winVar is already close to the theoretical 
+# minimum for random data
+meas_50 <- winVar_ran[ran_p == .50]
+ggplot(data.frame(x = meas_50), aes(x = x)) +
+  geom_histogram(bins = 30, fill = "#4C72B0", colour = "white", alpha = .8) +
+  labs(title = "winVar distribution for p = .50",
+       x = "winVar", y = "Count") +
+  theme_minimal()
+
+# this effect is even stronger for extreme proportions correct: for p = .97,
+# there are only 3 possible winVar values depending on whether the three 0s 
+# appear in different windows or 2-3 appear in the same window. The resulting 
+# large negative mode drives the leftward bar in the full distribution.
+meas_97 <- winVar_ran[ran_p == .97]
+ggplot(data.frame(x = meas_97), aes(x = x)) +
+  geom_histogram(bins = 30, fill = "#4C72B0", colour = "white", alpha = .8) +
+  labs(title = "winVar distribution for p = .97",
+       x = "winVar", y = "Count") +
+  theme_minimal()
+```
+In order to "compensate" for the small minority of extreme winVar values where 2 or 3 0s appear in the same window, the mode deviates quite strongly from 0 in the negative direction. The large negative bar in the distribution of all values combined is the result of these negative modes.
+
+
+### Correlations in realistic data
+
+```{r}
+#| label: correlation
+#| code-fold: false
+
+# compute correlations in realistic data
+real_meas = data.frame(binAC_real, binMSSD_real, SED_real, winVar_real)
+
+GGally::ggpairs(real_meas) +
+  theme(axis.text  = element_text(size = 5),
+        strip.text = element_text(size = 5))
+```
+
+```{r}
+#| code-fold: false
+
+cor(real_meas, use = "complete.obs") %>% 
+  round(2) %>% 
+  knitr::kable()
+```
+# Conclusion 
+
+Throughout this tutorial, we hope to have illustrated the breadth of statistical measures, each with different strengths and weaknesses, with which researchers can estimate cognitive variability across different data types. This will help further empirical investigation of cognitive variability across a wide range of contexts, tasks and settings. Depending on the scientific question, cognitive process studied, experimental task design and the type of data collected, researchers can make an informed choice among the available measures 
+
+
+<center>
+
+**How to cite this tutorial:**
+
+::: {style="white-space: pre-wrap;"}
+```
+van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: A narrative review of cognitive fluctuation in childhood and adolescence. JOURNAL. DOI: 
+```
+:::
+</center>
+
+# Appendix 
+
+## Software Citations
+
+```{r}
+#| label: citations
+#| output: asis
+
+library(grateful)
+library(formattable)
+
+pkgs <- cite_packages(
+  output = "table",
+  bib.file = "grateful-refs.bib",
+  out.dir = getwd(),
+  cite.tidyverse = TRUE,
+  include.RStudio = FALSE
+)
+
+formattable(
+  pkgs,
+  table.attr = 'class="table table-striped" style="font-size:13px; font-family:Lato; width:80%"'
+)
+```
+
+
+## Session Info
+
+```{r}
+#| label: session-info
+#| code-fold: false
+
+sessionInfo()
+```
+
+## References
