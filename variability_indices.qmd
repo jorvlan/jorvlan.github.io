@@ -49,21 +49,17 @@ categories:
 ```{=html}
 <a href="https://jorvlan.goatcounter.com">
   <img src="https://img.shields.io/badge/page%20views-click%20to%20see-blue?style=flat-square"
-       alt="page views"/>
+       alt="Views"/>
 </a>
 ```
-# Introduction
 
-<center>
-
+::: {.callout-note appearance="minimal"}
 **How to cite this tutorial:**
 
-::: {style="white-space: pre-wrap;"}
-```
-van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: A narrative review of cognitive fluctuation in childhood and adolescence. JOURNAL. DOI: 
-```
+van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: A narrative review of cognitive fluctuation in childhood and adolescence. JOURNAL. DOI:
 :::
-</center>
+
+# Introduction
 
 ::: {.callout-tip}
 We would like to acknowledge that other wonderful and detailed tutorials on intraindividual variability measures exist, for instance see [QuantDev Tutorials ](https://quantdev.ssri.psu.edu/tutorials/analysis-experience-sampling-ema-data-chapter-21-univariate-intraindividual-variability/). These cover some of the measures we illustrate (e.g., iSD, MSSD) but in addition explain variability measures for nominal data (e.g., entropy) which is beyond the scope of our tutorial as we primarily focus on continuous (response times) and binary (accuracy) variables. 
@@ -77,10 +73,14 @@ Each measure uses the same simulated dataset we provide, with the exception of t
 
 
 ::: {.callout-note}
-This tutorial assumes some familiarity with R and basic descriptive statistics. 
-The code and simulated data discussed in this section are available in the 
-[GitHub repository](https://github.com/jorvlan/cognitive_variability_review_project).
+This tutorial assumes some familiarity with R and basic descriptive statistics. The code and simulated data discussed in this section are available in the [GitHub repository](https://github.com/jorvlan/cognitive_variability_review_project).
 :::
+
+::: {.callout-note}
+Rather work with this tutorial directly in R/Rstudio? The source code for this tutorial is available as a `.qmd` file and can be downloaded [here](variability_indices.qmd). 
+::: 
+
+Let's dive in!
 
 ## Load required R packages
 ```{r}
@@ -2599,16 +2599,11 @@ cor(real_meas, use = "complete.obs") %>%
 Throughout this tutorial, we hope to have illustrated the breadth of statistical measures, each with different strengths and weaknesses, with which researchers can estimate cognitive variability across different data types. This will help further empirical investigation of cognitive variability across a wide range of contexts, tasks and settings. Depending on the scientific question, cognitive process studied, experimental task design and the type of data collected, researchers can make an informed choice among the available measures 
 
 
-<center>
-
+::: {.callout-note appearance="minimal"}
 **How to cite this tutorial:**
 
-::: {style="white-space: pre-wrap;"}
-```
-van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: A narrative review of cognitive fluctuation in childhood and adolescence. JOURNAL. DOI: 
-```
+van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: A narrative review of cognitive fluctuation in childhood and adolescence. JOURNAL. DOI:
 :::
-</center>
 
 # Appendix 
 
