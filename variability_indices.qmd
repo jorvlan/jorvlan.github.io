@@ -80,7 +80,12 @@ This tutorial assumes some familiarity with R and basic descriptive statistics. 
 Rather work with this tutorial directly in R/Rstudio? The source code for this tutorial is available as a `.qmd` file and can be downloaded [here](variability_indices.qmd). 
 ::: 
 
+
 Let's dive in!
+
+::: {.callout-note}
+Before loading the R packages, we need the C++ toolchain installed for DSEM. This might take a few minutes. See the comments in the section below on what to install prior to loading R packages. 
+:::
 
 ## Load required R packages
 ```{r}
@@ -94,6 +99,19 @@ Let's dive in!
 # set CRAN mirror
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
+# C++ toolchain (needed once, before installing cmdstanr / CmdStan) 
+# Only needed to compile the DSEM model written in Stan. Users can skip this step if they already have a toolchain.
+# These steps happen outside R:
+#
+# Windows: install Rtools matching your R version (check with R.version.string),
+#          then restart R: https://cran.r-project.org/bin/windows/Rtools/
+# macOS:   open Terminal and run: xcode-select --install
+# Linux:   run: sudo apt install build-essential   (Debian/Ubuntu; use the
+#          equivalent for your distribution)
+#
+# After installing cmdstanr below, check the toolchain with:
+# cmdstanr::check_cmdstan_toolchain()
+
 # install pacman if not already installed
 if (!require("pacman", quietly = TRUE)) install.packages("pacman", quiet = TRUE)
 
@@ -103,11 +121,6 @@ if (!require("cmdstanr")) {
   cmdstanr::install_cmdstan()
 }
 
-# easyRT is only available on GitHub
-if (!require("easyRT")) {
-  if (!require("remotes")) install.packages("remotes")
-  remotes::install_github("DominiqueMakowski/easyRT")
-}
 
 # p_load installs any missing packages from CRAN, then loads all
 pacman::p_load(
@@ -130,10 +143,16 @@ pacman::p_load(
   datawizard,
   ggdist,
   pracma,
-  stats,
   reshape2,
-  GGally
+  GGally,
+  ggplot2
 )
+
+# easyRT is only available on GitHub
+if (!require("easyRT")) {
+  if (!require("remotes")) install.packages("remotes")
+  remotes::install_github("DominiqueMakowski/easyRT")
+}
 
 # load packages that require special installation separately
 library(cmdstanr)
@@ -165,10 +184,14 @@ Let's take a first look at the timeseries data.
 
 ggplot(df.LSME, aes(x = time, y = y, group = subject, color = factor(subject))) +
   geom_line(alpha = 0.2) +
+  geom_hline(yintercept = mean(df.LSME$y, na.rm = TRUE),
+             linetype = "dashed", color = "black") +
   guides(color = "none") +
   labs(title = "Simulated time series for 100 subjects with 50 trials",
+       subtitle = "Dashed line reflects the mean across all subjects and trials",
        x = "Trial", y = "Y") +
   theme_minimal()
+
 ```
 
 ## Inspect & explain variables
@@ -184,7 +207,7 @@ What does each variable reflect?
 - **`wave`**: Amount of data collection 'waves' in this dataset (i.e., 1).
 - **`time`**: Total number of unique trials within a day/wave. (i.e., 1-50) 
 - **`y`**: Vector of the cognitive time series data (e.g., log-transformed response times).
-- **`Y_tm1`**: Lagged outcome (y at the previous observation within the same day/wave); drives the autoregressive part in models that take autoregression into account.
+- **`Y_tm1`**: Lagged outcome (y at the previous observation within the same day/wave); drives the autoregressive part in models that take autoregression into account. Note that the first value reflects the mean as no lagged value can be computed from the first observation. 
 - **`Y_tm1d`**: Lagged outcome from the previous day (cross-day lag). 
 - **`ctime`**: Running trial number, but **`time`** divided by 100 to ease the sampler in linear systematic change estimation in e.g., DSEM. 
 - **`mtime`**: Each subject's mean time across observations. This ensures a within-person centered trend so the intercept reflects the person's mean level rather than time = 0.
@@ -234,6 +257,8 @@ df.LSME <- df.LSME %>%
   mutate(iSD = sd(y, na.rm = TRUE)) %>%
   ungroup()
 ```
+
+From here the dataframe will expand (adding a column) each time a new measure is computed.
 
 ```{r}
 #| code-fold: false
@@ -299,6 +324,7 @@ ggplot(df.LSME %>% distinct(subject, iSD), aes(x = iSD)) +
   geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
   geom_vline(xintercept = mean(df.LSME$iSD, na.rm = TRUE), linetype = "dashed") +
   labs(title = "Distribution of iSD",
+       subtitle = "Dashed line = mean iSD across subjects",
        x = "Value", y = "Count") +
   theme_minimal()
 ```
@@ -367,6 +393,7 @@ trends <- df.LSME %>%
   group_by(subject) %>%
   summarise(slope = coef(lm(y ~ time))[2])
 
+# merge the trends dataframe with the overal dataframe
 df.LSME <- df.LSME %>%
   left_join(trends, by = "subject")
 
@@ -427,6 +454,7 @@ ggplot(df.LSME %>% distinct(subject, diSD), aes(x = diSD)) +
   geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
   geom_vline(xintercept = mean(df.LSME$diSD, na.rm = TRUE), linetype = "dashed") +
   labs(title = "Distribution of detrended iSD",
+       subtitle = "Dashed line = mean detrended iSD across subjects",
        x = "Detrended iSD", y = "Count") +
   theme_minimal()
 ```
@@ -447,18 +475,89 @@ geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE, color = "red")
 ```
 :::
 
+### Estimate polynomial (2nd order) detrended iSD
+
+```{r}
+#| label: method-disd-poly
+#| code-fold: false
+
+df.LSME <- df.LSME %>%
+  group_by(subject) %>%
+  mutate(
+    trend_poly     = predict(lm(y ~ time + I(time^2))),
+    y_detrend_poly = y - trend_poly,
+    diSD_poly      = sd(y_detrend_poly, na.rm = TRUE)
+  ) %>%
+  ungroup()
+```
+
+```{r}
+#| code-fold: false
+
+df.LSME %>%
+  distinct(subject, iSD, diSD, diSD_poly) %>%
+  head() %>%
+  knitr::kable(digits = 2)
+```
+
+#### Step 1: Visualize polynomial (2nd order) trend fit
+
 ```{r}
 #| code-fold: false
 
 ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
        aes(x = time, y = y)) +
   geom_line(alpha = 0.4) +
-  geom_point(aes(color = y_detrend^2)) +
+  geom_point(aes(color = y_detrend_poly^2)) +
   geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE, color = "red") +
   scale_color_viridis_c(option = "magma", name = "Residual²") +
   facet_wrap(~subject, labeller = labeller(subject = facet_labels_isd_only)) +
   labs(title = "Polynomial (2nd order) trend fit per subject",
        subtitle = "Point color reflects squared deviation from linear trend")
+
+```
+
+#### Step 2: Visualize polynomial detrended residuals
+
+```{r}
+#| code-fold: false
+
+# labels with iSD and polynomial diSD
+label_dat_disd_poly <- df.LSME %>%
+  filter(subject %in% sample_ids_isd) %>%
+  distinct(subject, iSD, diSD_poly) %>%
+  mutate(label = paste0("Subject ", subject,
+                        " | iSD = ",      round(iSD,      2),
+                        " | diSD(poly) = ", round(diSD_poly, 2)))
+facet_labels_disd_poly <- setNames(label_dat_disd_poly$label,
+                                   label_dat_disd_poly$subject)
+
+ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
+       aes(x = time, y = y_detrend_poly)) +
+  geom_point() +
+  geom_line(alpha = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  facet_wrap(~subject, labeller = labeller(subject = facet_labels_disd_poly)) +
+  labs(title = "Polynomial detrended scores (residuals)",
+       y = "Detrended residual") +
+  theme(strip.text = element_text(size = 7))
+```
+
+#### Step 3: Show polynomial detrended iSD values
+
+```{r}
+#| label: plot-disd-poly
+#| code-fold: false
+
+ggplot(df.LSME %>% distinct(subject, diSD_poly), aes(x = diSD_poly)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  geom_vline(xintercept = mean(df.LSME %>% distinct(subject, diSD_poly) %>%
+                               pull(diSD_poly), na.rm = TRUE),
+             linetype = "dashed") +
+  labs(title = "Distribution of polynomial detrended iSD",
+       subtitle = "Dashed line = mean polynomial detrended iSD across subjects",
+       x = "Detrended iSD (2nd order)", y = "Count") +
+  theme_minimal()
 ```
 
 ---
@@ -539,12 +638,13 @@ ggplot(iCV_raw, aes(x = iCV_raw)) +
   geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
   geom_vline(xintercept = mean(iCV_raw$iCV_raw, na.rm = TRUE), linetype = "dashed") +
   labs(title = "iCV without shifting — extreme values near-zero means",
+       subtitle = "Dashed line = mean iCV across subjects",
        x = "iCV (unshifted)", y = "Count") +
   theme_minimal()
 ```
 
 ::: {.callout-note}
-This histogram illustrates that extreme values are caused by indiviudals with very small means close to zero. It is difficult to interpret this figure as the mean (dashed line) is pulled away from the distribution. 
+This histogram illustrates that extreme values are caused by indiviudals with very small means close to zero making it difficult to interpret this figure. 
 :::
 
 If we *do* shift:
@@ -558,6 +658,7 @@ ggplot(df.LSME %>% distinct(subject, iCV), aes(x = iCV)) +
   geom_vline(xintercept = mean(df.LSME %>% distinct(subject, iCV) %>% pull(iCV),
                                na.rm = TRUE), linetype = "dashed") +
   labs(title = "iCV after shifting — distribution is now interpretable",
+       subtitle = "Dashed line = mean iCV across subjects",
        x = "iCV (shifted)", y = "Count") +
   theme_minimal()
 ```
@@ -639,6 +740,7 @@ ggplot(df.LSME %>% distinct(subject, MSSD), aes(x = MSSD)) +
   geom_vline(xintercept = mean(df.LSME %>% distinct(subject, MSSD) %>% pull(MSSD),
                                na.rm = TRUE), linetype = "dashed") +
   labs(title = "Distribution of MSSD across subjects",
+       subtitle = "Dashed line = mean MSSD across subjects",
        x = "MSSD", y = "Count") +
   theme_minimal()
 ```
@@ -749,6 +851,7 @@ ggplot(df.LSME %>% distinct(subject, MSSD_detrend), aes(x = MSSD_detrend)) +
                                pull(MSSD_detrend), na.rm = TRUE),
              linetype = "dashed") +
   labs(title = "Distribution of detrended MSSD across subjects",
+       subtitle = "Dashed line = mean detrended MSSD across subjects",
        x = "Detrended MSSD", y = "Count") +
   theme_minimal()
 ```
@@ -804,6 +907,7 @@ ggplot(df.LSME %>% distinct(subject, rMSSD), aes(x = rMSSD)) +
   geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
   geom_vline(xintercept = mean(df.LSME$rMSSD), linetype = "dashed") +
   labs(title = "Distribution of rMSSD across subjects",
+       subtitle = "Dashed line = mean rMSSD across subjects",
        x = "rMSSD", y = "Count") +
   theme_minimal()
 ```
@@ -893,6 +997,7 @@ ggplot(subject_exGauss, aes(x = tau)) +
   geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
   geom_vline(xintercept = mean(subject_exGauss$tau), linetype = "dashed") +
   labs(title = "Distribution of ex-Gaussian tau across subjects",
+       subtitle = "Dashed line = mean Tau across subjects",
        x = "Tau", y = "Count") +
   theme_minimal()
 
@@ -900,6 +1005,7 @@ ggplot(subject_exGauss, aes(x = mu)) +
   geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
   geom_vline(xintercept = mean(subject_exGauss$mu), linetype = "dashed") +
   labs(title = "Distribution of ex-Gaussian mu across subjects",
+       subtitle = "Dashed line = mean Mu across subjects",
        x = "Mu", y = "Count") +
   theme_minimal()
 
@@ -907,6 +1013,7 @@ ggplot(subject_exGauss, aes(x = sigma)) +
   geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
   geom_vline(xintercept = mean(subject_exGauss$sigma), linetype = "dashed") +
   labs(title = "Distribution of ex-Gaussian sigma across subjects",
+       subtitle = "Dashed line = mean Sigma across subjects",
        x = "Sigma", y = "Count") +
   theme_minimal()
 ```
@@ -944,10 +1051,13 @@ df.LSME_wider %>% head() %>% knitr::kable(digits = 2)
 ```{r}
 #| code-fold: false
 
-GGally::ggpairs(df.LSME_wider[, c("iSD", "diSD", "iCV", 
-                                   "MSSD", "MSSD_detrend", "rMSSD", 
-                                   "tau", "sigma", "mu")]) +
-  theme(axis.text = element_text(size = 5),
+GGally::ggpairs(
+  df.LSME_wider[, c("iSD", "diSD", "iCV",
+                    "MSSD", "MSSD_detrend", "rMSSD",
+                    "tau", "sigma", "mu")],
+  upper = list(continuous = GGally::wrap("cor", title = ""))
+) +
+  theme(axis.text  = element_text(size = 5),
         strip.text = element_text(size = 5))
 ```
 
@@ -1026,6 +1136,7 @@ ggplot(df.LSME %>% distinct(subject, lm_sigma), aes(x = lm_sigma)) +
   geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
   geom_vline(xintercept = mean(df.LSME$lm_sigma, na.rm = TRUE), linetype = "dashed") +
   labs(title = "Distribution of residual SD across subjects",
+       subtitle = "Dashed line = mean sigma across subjects",
        x = "Residual SD", y = "Count") +
   theme_minimal()
 ```
@@ -1115,6 +1226,10 @@ str(dsem_list)
 The DSEM model code below is written in [Stan](https://mc-stan.org/) and 'vectorized' to optimize Bayesian sampling. You can learn more about 'Vectorization' [here](https://mc-stan.org/docs/2_18/stan-users-guide/vectorization.html) 
 :::
 
+::: {.callout-note}
+Fitting a DSEM in R requires CmdStan, which is sometimes not a trivial installation. What is needed to make this work: (1) install the C++ toolchain
+:::
+
 ```{r}
 #| label: method-dsem-compile
 #| code-fold: false
@@ -1196,14 +1311,17 @@ generated quantities {
 }
 "
 
-writeLines(dsem_standard, "dsem_standard.stan") # write the model code to disk
+# The DSEM is saved as a .stan file which you can save to your local pc with writeLines which saves it in your current working directory. Make sure that your working directory is writeable. 
 
-# Reload the model code and apply stanc optimization (see https://mc-stan.org/docs/stan-users-guide/using-stanc.html)
+writeLines(dsem_standard, "dsem_standard.stan") 
+
+# Reload the model code and apply stanc optimization for efficient sampling (see https://mc-stan.org/docs/stan-users-guide/using-stanc.html)
 model2 <- cmdstan_model(
   "dsem_standard.stan",
   stanc_options = list("O1")
 )
 ```
+
 
 #### Fit DSEM
 ```{r}
@@ -1523,7 +1641,8 @@ as.data.frame(m_ddm) |>
   ggdist::stat_slabinterval(aes(x = value, fill = Parameter), slab_linewidth = NA, scale = 1, normalize = "xy") +
   geom_vline(xintercept = 0, linetype = "dashed") + 
   coord_cartesian(xlim = c(-2.5, 5)) +
-  theme_minimal()
+  theme_minimal() +
+  theme(legend.position = "none")
 ```
 
 - **`b_Intercept`** — baseline drift rate (when condition = 0)
@@ -1567,10 +1686,13 @@ df.LSME_wider %>% head() %>% knitr::kable(digits = 2)
 ```{r}
 #| code-fold: false
 
-GGally::ggpairs(df.LSME_wider[, c("iSD", "diSD", "iCV",
-                                   "MSSD", "MSSD_detrend", "rMSSD",
-                                   "tau", "sigma", "mu",
-                                   "lm_sigma", "dsem_sd")]) +
+GGally::ggpairs(
+  df.LSME_wider[, c("iSD", "diSD", "iCV",
+                    "MSSD", "MSSD_detrend", "rMSSD",
+                    "tau", "sigma", "mu",
+                    "lm_sigma", "dsem_sd")],
+  upper = list(continuous = GGally::wrap("cor", size = 2.5, title = ""))
+) +
   theme(axis.text  = element_text(size = 4),
         strip.text = element_text(size = 5))
 ```
@@ -1792,6 +1914,7 @@ results %>%
   facet_wrap(~estimate, scales = "free_x") +
   theme_minimal() +
   labs(title = "Distribution of relative variability estimates",
+       subtitle = "Dashed line = mean values across subjects",
        x = NULL, y = "Count")
 
 ```
@@ -1801,7 +1924,10 @@ results %>%
 ```{r}
 #| code-fold: false
 
-GGally::ggpairs(results[, c("SD_rel", "RMSSD_rel", "IQR_rel", "RANGE_rel")]) +
+GGally::ggpairs(
+  results[, c("SD_rel", "RMSSD_rel", "IQR_rel", "RANGE_rel")],
+  upper = list(continuous = GGally::wrap("cor", title = ""))
+) +
   theme(axis.text  = element_text(size = 5),
         strip.text = element_text(size = 5))
 ```
@@ -1835,19 +1961,77 @@ First we load the required R packages and simulate two datasets: (1) a random si
 #| code-fold: false
 #| eval: true
 
-## load packages
-library(psych)
-library(stats)
-library(ggplot2)
-library(reshape2)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+if (!require("pacman", quietly = TRUE)) install.packages("pacman", quiet = TRUE)
 
+pacman::p_load(psych, stats, ggplot2, reshape2)
+
+# Load helper scripts, necessary to make this work when publishing the tutorial. 
+# These are not needed when users work with the tutorial as code chunks of these are included below.
 source("PlotMeasures_Function.R") #required for some plotting functions
-source("BinVar_Functions.R") #same functions as illustrated in the code blocks below
+source("BinVar_Functions.R") #same functions as illustrated in the code blocks below.
 
 # For the MSSD, sequential streakiness, and windowed SD, a "standardization procedure" is performed. The functions will output the standardized value by default; it is also possible to specify that you want the "raw" or partly standardized values (see the Bivar_Functions.R script for more information). The functions accept data frames with a time series per row as input. The output is a vector or a data frame with values.
 
 ```
 
+#### Helper function to plot the binary variability 
+
+Press "show" to view the `plot_meas()` function which can be used to plot 9 example time series with the 3 low, 3 mid, and 3 high scores for a certain measure.
+
+```{r}
+#| label: plot-meas-function
+#| code-fold: true
+#| code-summary: "show"
+
+# This function can be used to plot 9 example time series with the 3 low,
+# 3 mid, and 3 high scores for a certain measure.
+
+# insert a time series matrix, a vector with measures, and the name of the
+# measure to be displayed in the plot
+plot_meas = function(ts_df, meas, meas_name) {
+
+  # make sure ts_df is a data frame
+  ts_df = as.data.frame(ts_df)
+
+  # get the 3 indices for the Q1, middle, and Q3 scores
+  ordered_meas = order(meas)
+  n  = length(meas)
+  Q1 = round(n * .25)
+  Q2 = round(n * .50)
+  Q3 = round(n * .75)
+  low_index  = ordered_meas[Q1:(Q1 + 2)]
+  mid_index  = ordered_meas[Q2:(Q2 + 2)]
+  high_index = ordered_meas[Q3:(Q3 + 2)]
+  indices = c(low_index, mid_index, high_index)
+
+  # get the values
+  sorted_meas = sort(meas)
+  low  = sorted_meas[Q1:(Q1 + 2)]
+  mid  = sorted_meas[Q2:(Q2 + 2)]
+  high = sorted_meas[Q3:(Q3 + 2)]
+
+  # generate titles object for plot
+  titles      = as.character(round(c(low, mid, high), digits = 2))
+  titles_plot = setNames(titles, 1:9)
+
+  # get plot data for the 9 selected time series and melt, add ID
+  plot_dat = ts_df[indices, ]
+  plot_dat$ID = as.factor(1:9)
+  plot_melt = reshape2::melt(plot_dat, id.vars = "ID")
+
+  # return plot with the 9 time series
+  plot = ggplot(data = plot_melt) +
+    geom_line(aes(x = variable, y = value, group = ID, col = ID)) +
+    ggtitle(meas_name) +
+    facet_wrap(~ID, nrow = 3, labeller = labeller(ID = titles_plot)) +
+    xlab("Trials") + ylab("Accuracy") +
+    theme(legend.position = "none",
+          axis.text = element_blank(),
+          axis.ticks = element_blank())
+  return(plot)
+}
+```
 
 ##### Two simulated data
 Here, we simulate two data sets to illustrate the behaviour of the measures: 
@@ -2498,25 +2682,6 @@ ggplot(data.frame(x = winVar_ran_clean), aes(x = x)) +
 t.test(winVar_ran_clean)
 cor.test(winVar_ran_clean, ran_p_clean)
 
-# note that the t-test and correlation are significant due to a minority of 
-# extreme values from time series with very extreme proportions correct. 
-# The effect disappears when excluding the most extreme proportions:
-sel_p          <- seq(.02, .98, by = .01)
-winVar_ran_sel <- winVar_ran_clean[ran_p_clean %in% sel_p]
-ran_p_sel      <- ran_p_clean[ran_p_clean %in% sel_p]
-
-ggplot(data.frame(x = winVar_ran_sel), aes(x = x)) +
-  geom_histogram(bins = 100, fill = "#4C72B0", colour = "white", alpha = .8) +
-  labs(title = "Distribution of windowed variance (excluding extreme p)",
-       x = "winVar", y = "Count") +
-  theme_minimal()
-
-t.test(winVar_ran_sel)
-cor.test(winVar_ran_sel, ran_p_sel)
-# once the two most extreme proportions correct (.01 and .99) are excluded,
-# both the t-test and correlation become non-significant as expected for 
-# random data
-
 # compute in the realistic data set and plot example trajectories
 winVar_real <- vector()
 for (row in 1:nrow(real_simdat)) {winVar_real[row] <- winVar(real_simdat[row,])}
@@ -2582,7 +2747,10 @@ In order to "compensate" for the small minority of extreme winVar values where 2
 # compute correlations in realistic data
 real_meas = data.frame(binAC_real, binMSSD_real, SED_real, winVar_real)
 
-GGally::ggpairs(real_meas) +
+GGally::ggpairs(
+  real_meas,
+  upper = list(continuous = GGally::wrap("cor", title = ""))
+) +
   theme(axis.text  = element_text(size = 5),
         strip.text = element_text(size = 5))
 ```
