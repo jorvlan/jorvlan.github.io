@@ -1,6 +1,6 @@
 ---
-title: "Estimating variability: From A, B, C to Tau, Sigma, Psi"
-subtitle: "Statistical measures to quantify 'Cognitive Variability' in continuous, bounded and binary data"
+title: "How to estimate Cognitive Variability: From *A*, *B*, *C* to *Tau (τ)*, *Sigma (σ)*, *Psi (ψ)*"
+subtitle: "A hands-on tutorial using continuous, double bounded, and binary data"
 authors: 
   - name: "Jordy van Langen"
     orcid: 0000-0003-2504-2381
@@ -43,7 +43,8 @@ execute:
   
 categories:
   - cognitive variability
-  - statistical measures              
+  - statistical measures
+  - open science           
 
 ---
 ```{=html}
@@ -62,30 +63,24 @@ van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on 
 # Introduction
 
 ::: {.callout-tip}
-We would like to acknowledge that other wonderful and detailed tutorials on intraindividual variability measures exist, for instance see [QuantDev Tutorials ](https://quantdev.ssri.psu.edu/tutorials/analysis-experience-sampling-ema-data-chapter-21-univariate-intraindividual-variability/). These cover some of the measures we illustrate (e.g., iSD, MSSD) but in addition explain variability measures for nominal data (e.g., entropy) which is beyond the scope of our tutorial as we primarily focus on continuous (response times) and binary (accuracy) variables. 
+We would like to acknowledge that other wonderful tutorials on intraindividual variability measures exist, for instance see [QuantDev Tutorials ](https://quantdev.ssri.psu.edu/tutorials/analysis-experience-sampling-ema-data-chapter-21-univariate-intraindividual-variability/). These cover some of the measures we illustrate (e.g., iSD, MSSD) but also describe variability measures for nominal data (e.g., entropy) which is beyond the scope of our tutorial as we primarily focus on continuous (response times) and binary (accuracy) variables. 
 :::
 
-This tutorial is published together with the paper: <DOI> and encompasses an extensive and fully reproducible walk-through of the various statistical measures that can quantify variability in cognitive performance data. With this document, we want to support researchers in estimating a range of measures capturing variability, each with different strengths and weaknesses and the nature of data it is tailored to. This in turn can help further empirical investigation of cognitive variability across a wide range of contexts, tasks and settings. 
+This is an extensive walk-through of the various statistical measures that can quantify variability in cognitive performance data. With this tutorial, we want to support researchers in estimating a range of measures capturing variability, each having their own strengths and limitations. This tutorial can guide furture empirical investigation of cognitive variability across a wide range of research questions, cognitive tasks and experimental designs. 
 
-Across the known empirical literature, cognitive variability has been operationalized through simple measures like the (individual) Standard Deviation or Coefficient of Variation but also through measures derived from more complex multilevel models such as the Innovations from Dynamic Structural Equation Modeling (DSEM).
+In the empirical literature, cognitive variability has been operationalized through simple measures like the intraindividual Standard Deviation (iSD) or intraindividual Coefficient of Variation (iCV) and more recently through measures derived from latent multilevel models such as the Innovations from Dynamic Structural Equation Modeling (DSEM).
 
-Each measure uses the same simulated dataset we provide, with the exception of the Drift Diffusion Model (DDM), the 'Relative Variability' measures and the section about variability in binary variables. We start by explaining the simple direct estimators and end with more complex latent modeling techniques. Please inspect the 'Content' bar on the left side for a quick overview of the flow. 
+We illustrate each measure through the use of simulated datasets, with the exception of the (1) Drift Diffusion Model (DDM), (2) the 'Relative Variability' measures. We start by explaining the simpler measures and work our way up to the more complex latent modeling frameworks. Please inspect the 'Content' bar on the left side for an overview of the flow. 
 
 
 ::: {.callout-note}
+Before loading the R packages, users need the C++ toolchain installed to run the DSEM section. Installing this, might take a few minutes. See the comments in the section below on what to install prior to loading R packages.
+
 This tutorial assumes some familiarity with R and basic descriptive statistics. The code and simulated data discussed in this section are available in the [GitHub repository](https://github.com/jorvlan/cognitive_variability_review_project).
+
+Rather work with this tutorial directly in R/Rstudio? The source code for this tutorial is available as a `.qmd` file and can be downloaded [here](variability_indices.qmd).
 :::
 
-::: {.callout-note}
-Rather work with this tutorial directly in R/Rstudio? The source code for this tutorial is available as a `.qmd` file and can be downloaded [here](variability_indices.qmd). 
-::: 
-
-
-Let's dive in!
-
-::: {.callout-note}
-Before loading the R packages, we need the C++ toolchain installed for DSEM. This might take a few minutes. See the comments in the section below on what to install prior to loading R packages. 
-:::
 
 ## Load required R packages
 ```{r}
@@ -160,12 +155,11 @@ library(easyRT)
 ```
 
 
-## Simulated Data
+## Simulated data
 
-Here we simulate a dataset representing Intensive Longitudinal Data (ILD) which is common in e.g., experience sampling (ESM) studies. Specifically, we simulate data for 100 subjects, having performed 50 trials on a single day. 
+Here we simulate a dataset typical of Intensive Longitudinal Data (ILD) which is common in experience sampling (ESM) studies. Specifically, we simulate data for 100 subjects, having performed 50 trials on a single day. 
 
-The data is in long format where rows represent trials and columns represent the variables. 
-The R code that simulates the data is directly available [here](https://raw.githubusercontent.com/jorvlan/cognitive_variability_review_project/refs/heads/main/measures/sim_data_review.R).
+The data is in long format where rows represent trials and columns represent the variables. The R code that simulates these data is directly available [here](https://raw.githubusercontent.com/jorvlan/cognitive_variability_review_project/refs/heads/main/measures/sim_data_review.R).
 
 ## Read in simulated dataset
 
@@ -176,7 +170,7 @@ The R code that simulates the data is directly available [here](https://raw.gith
 df.LSME <- read.csv("https://raw.githubusercontent.com/jorvlan/cognitive_variability_review_project/refs/heads/main/measures/sim_data.csv")
 ```
 
-Let's take a first look at the timeseries data. 
+Let's visually inspect the trial-level timeseries data.
 
 ```{r}
 #| label: spaghetti-plot
@@ -188,7 +182,7 @@ ggplot(df.LSME, aes(x = time, y = y, group = subject, color = factor(subject))) 
              linetype = "dashed", color = "black") +
   guides(color = "none") +
   labs(title = "Simulated time series for 100 subjects with 50 trials",
-       subtitle = "Dashed line reflects the mean across all subjects and trials",
+       subtitle = "Dashed line reflects the mean across all subjects and trials\nEach line is a subject",
        x = "Trial", y = "Y") +
   theme_minimal()
 
@@ -208,7 +202,6 @@ What does each variable reflect?
 - **`time`**: Total number of unique trials within a day/wave. (i.e., 1-50) 
 - **`y`**: Vector of the cognitive time series data (e.g., log-transformed response times).
 - **`Y_tm1`**: Lagged outcome (y at the previous observation within the same day/wave); drives the autoregressive part in models that take autoregression into account. Note that the first value reflects the mean as no lagged value can be computed from the first observation. 
-- **`Y_tm1d`**: Lagged outcome from the previous day (cross-day lag). 
 - **`ctime`**: Running trial number, but **`time`** divided by 100 to ease the sampler in linear systematic change estimation in e.g., DSEM. 
 - **`mtime`**: Each subject's mean time across observations. This ensures a within-person centered trend so the intercept reflects the person's mean level rather than time = 0.
 
@@ -217,30 +210,29 @@ What does each variable reflect?
 
 # Statistical measures
 
-## Overview of Variability Estimates
+## Overview of variability measures for continuous data
 
-| Variability Estimate | Conceptual Strength | Conceptual Limitation | Suits Data Type |
+| Variability measure | Strength | Limitation | Suits Data Type |
 |---|---|---|---|
-| **Individual Standard Deviation (iSD)** | Easy to compute, suitable for continuous data | Not suitable for binary data (mean dependency); potentially conflates distinct characteristics of cognitive performance (e.g., learning effects, measurement error, autocorrelation) | Continuous data (e.g., response times) |
+| **intraindividual Standard Deviation (iSD)** | Easy to compute, suitable for continuous data | Not suitable for binary data (mean dependency); potentially conflates distinct characteristics of cognitive performance (e.g., learning effects, measurement error, autocorrelation) | Continuous data (e.g., response times) |
 | **Detrended iSD (residual iSD)** | Easy to compute, suitable for continuous data | Not suitable for binary data (mean dependency); uses residuals as data | Continuous data (e.g., response times) |
 | **Dynamic Structural Equation Modeling (Innovations)** | Flexible and extendible modeling framework; hierarchical modeling allows estimation of random effects across multiple levels; can separate measurement error from innovations | Less suitable for binary data; difficult to implement outside proprietary software; Bayesian sampling can be computationally intensive | Time-series data, Intensive Longitudinal Data (ILD), N = 1, N > 1 |
 | **Mean Square of Successive Differences (MSSD)** | Easy to compute, suitable for binary data | Conflates autocorrelation with innovations and systematic changes | Binary (0/1) data, continuous data |
 | **Detrended MSSD** | Easy to compute, suitable for binary data | Conflates autocorrelation with innovations; uses residuals as data | Binary (0/1) data, continuous data |
 | **root MSSD** | Easy to compute, suitable for binary data; outcome expressed in original raw units (easier for interpretation than MSSD) | Conflates autocorrelation with innovations and systematic changes | Binary(0/1) data, continuous data |
 | **Ex-Gaussian Tau** | Suitable for continuous data; does not assume a Gaussian distribution | Not suitable for binary data | Continuous data (e.g., response times) |
-| **Individual Coefficient of Variation (iCV)** | Easy to compute, not mean dependent | Not suitable for binary data; assumes linear relationship between mean and SD | Continuous data (e.g., response times) |
+| **intraindividual Coefficient of Variation (iCV)** | Easy to compute, not mean dependent | Not suitable for binary data; assumes linear relationship between mean and SD | Continuous data (e.g., response times) |
 | **Drift Diffusion Modeling (Drift/Delta)** | Takes into account speed/accuracy tradeoffs; theoretically interpretable parameters for a subset of choice-response time tasks | Difficult to extend to a wide battery of cognitive tasks and measures | Response time and binary accuracy data |
 | **Gaussian Random-Effects (lme4)** | Easy to estimate for N = 1 data; can examine variability at multiple timescales | Difficulty estimating individual differences in variability components; variability estimates do not benefit from partial pooling | Continuous data (e.g., response times) 
 
 
-: Overview of variability estimates, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
+: Overview of variability measures, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
 
-## individual Standard Deviation 
+## intraindividual Standard Deviation 
 
 ### Description
 
-The individual Standard Deviation (iSD) is the square root of the average squared
-deviation from the mean and the formula is:
+The intraindividual Standard Deviation (iSD) is the square root of the average squared deviation from an individual's mean and is a measure of the overall spread of intraindividual variability ignoring the temporal order of measurements. The mathematical formula is:
 
 $$
 \text{SD}_i = \sqrt{\frac{1}{T-1} \sum_{t=1}^{T}(y_{it} - \bar{y}_i)^2}
@@ -258,7 +250,7 @@ df.LSME <- df.LSME %>%
   ungroup()
 ```
 
-From here the dataframe will expand (adding a column) each time a new measure is computed.
+From here, the dataframe will expand (adding a column) each time a new measure is computed.
 
 ```{r}
 #| code-fold: false
@@ -269,6 +261,8 @@ df.LSME %>%
   head() %>%
   knitr::kable(digits = 2)
 ```
+
+### Highlighting the results for a few subjects
 
 ```{r}
 #| code-fold: false
@@ -314,7 +308,7 @@ ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
        subtitle = "Red dashed = mean; blue dotted = mean ± 1 SD")
 ```
 
-### Results
+### Distribution of iSD values for all subjects
 
 ```{r}
 #| label: plot-sd
@@ -331,7 +325,7 @@ ggplot(df.LSME %>% distinct(subject, iSD), aes(x = iSD)) +
 
 ---
 
-## Detrended Individual Standard Deviation (residual iSD)
+## Detrended intraindividual Standard Deviation (residual iSD)
 
 ### Description
 
@@ -383,7 +377,7 @@ df.LSME %>%
   knitr::kable(digits = 2)
 ```
 
-### Results
+### Highlighting the results for a few subjects
 
 ```{r}
 #| code-fold: false
@@ -444,7 +438,7 @@ ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
   labs(title = "Detrended scores (residuals)")
 ```
 
-#### Step 3: Show detrended iSD values
+#### Step 3: Show detrended iSD values for all subjects
 
 ```{r}
 #| label: plot-disd
@@ -500,6 +494,8 @@ df.LSME %>%
   knitr::kable(digits = 2)
 ```
 
+### Highlighting the results for a few subjects
+
 #### Step 1: Visualize polynomial (2nd order) trend fit
 
 ```{r}
@@ -543,7 +539,7 @@ ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
   theme(strip.text = element_text(size = 7))
 ```
 
-#### Step 3: Show polynomial detrended iSD values
+#### Step 3: Show polynomial detrended iSD values across all subjects
 
 ```{r}
 #| label: plot-disd-poly
@@ -562,17 +558,13 @@ ggplot(df.LSME %>% distinct(subject, diSD_poly), aes(x = diSD_poly)) +
 
 ---
 
-## Individual Coefficient of Variation (iCV)
+## intraindividual Coefficient of Variation (iCV)
 
 ### Description
 
-The individual Coefficient of Variation (iCV) reflects each subject's
+The intraindividual Coefficient of Variation (iCV) reflects each subject's
 standard deviation relative to their mean, making it scale-free and
-comparable across subjects with different mean levels. In comparison to the 
-relative variability indices by Mestdagh et al., (2018), see further below, the iCV is 
-suited for variables with a lower bound (e.g. response times) whereas the 
-relative variability indices are suited for variables with both a lower and 
-upper bound (e.g. Visual Analogue Scales).
+comparable across subjects with different mean levels. 
 
 $$
 \text{iCV}_i = \frac{\text{iSD}_i}{\bar{y}_i}
@@ -618,7 +610,7 @@ df.LSME %>%
   knitr::kable(digits = 2)
 ```
 
-### Results
+### Highlighting iCV values across all subjects
 
 If we do *not* shift:
 
@@ -647,6 +639,8 @@ ggplot(iCV_raw, aes(x = iCV_raw)) +
 This histogram illustrates that extreme values are caused by indiviudals with very small means close to zero making it difficult to interpret this figure. 
 :::
 
+### Highlighting iCV values across all subjects 
+
 If we *do* shift:
 
 ```{r}
@@ -671,7 +665,7 @@ ggplot(df.LSME %>% distinct(subject, iCV), aes(x = iCV)) +
 
 The MSSD captures variability by computing the average squared difference
 between consecutive observations. Unlike the iSD, it is sensitive to the
-**order** of measurements, making it suitable to capture instability over time:
+**order** of measurements and therefore reflects the magnitude of changes from one observation to the next, making it suitable to capture instability over time:
 
 $$
 \text{MSSD}_i = \frac{1}{T-1} \sum_{t=2}^{T}(y_{it} - y_{i,t-1})^2
@@ -704,7 +698,7 @@ df.LSME %>%
   knitr::kable(digits = 2)
 ```
 
-### Results
+### Highlighting the results for a few subjects
 
 ```{r}
 #| code-fold: false
@@ -730,6 +724,8 @@ ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
   labs(title = "MSSD per subject",
        subtitle = "Point color reflects squared successive difference; red dashed = mean")
 ```
+
+### Highlighting the MSSD values across all subjects 
 
 ```{r}
 #| label: plot-mssd
@@ -784,7 +780,7 @@ df.LSME %>%
   knitr::kable(digits = 2)
 ```
 
-### Results
+### Highlighting the MSSD values for a few subjects
 
 ```{r}
 #| code-fold: false
@@ -839,7 +835,7 @@ ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
   theme(strip.text = element_text(size = 7))
 ```
 
-#### Step 3: Show detrended MSSD values
+#### Step 3: Highlighting the detrended MSSD values across all subjects
 
 ```{r}
 #| label: plot-dmssd
@@ -860,7 +856,7 @@ ggplot(df.LSME %>% distinct(subject, MSSD_detrend), aes(x = MSSD_detrend)) +
 When there is a linear trend, the detrended MSSD will be almost identical to the MSSD. As successive differences are computed, the linear trend of a slope will just add a constant value to the difference, meaning that the variance of differences and MSSD will remain unchanged. In cases where successive difference are not constant such as non-linear trends (cubic, quadratic etc.) systematic changes (trend) can inflate the raw MSSD. 
 :::
 
-## Root Mean Square of Successive Differences (rMSSD)
+## root Mean Square of Successive Differences (rMSSD)
 
 ### Description
 
@@ -897,7 +893,7 @@ df.LSME %>%
   knitr::kable(digits = 2)
 ```
 
-### Results
+### Highlighting the rMSSD across all subjects
 
 ```{r}
 #| label: plot-rmssd
@@ -986,7 +982,7 @@ df.LSME %>%
   knitr::kable(digits = 2)
 ```
 
-### Results
+### Highlighting the ex-Gaussian measures across all subjects
 
 ```{r}
 #| label: plot-exgaussian
@@ -1022,44 +1018,6 @@ ggplot(subject_exGauss, aes(x = sigma)) +
 Here we use `BayesianExgaussian()` from the package `ExGaussEstim` and estimate parameters for each subject separately. Hence, we do not pool information from subjects in a hierarchical fashion. Estimating a hierarchical ex-gaussian is, in theory, possible with package `brms` using `family = exgaussian()`.
 :::
 
-
-### Overview of all measures (thus far)
-
-```{r}
-#| code-fold: false
-
-df.LSME_wider <- df.LSME %>%
-  group_by(subject) %>%
-  summarise(
-    y            = mean(y,            na.rm = TRUE),
-    iSD          = mean(iSD,          na.rm = TRUE),
-    diSD         = mean(diSD,         na.rm = TRUE),
-    iCV          = mean(iCV,          na.rm = TRUE),
-    MSSD         = mean(MSSD,         na.rm = TRUE),
-    MSSD_detrend = mean(MSSD_detrend, na.rm = TRUE),
-    rMSSD        = mean(rMSSD,        na.rm = TRUE),
-    tau          = mean(tau,          na.rm = TRUE),
-    sigma        = mean(sigma,        na.rm = TRUE),
-    mu           = mean(mu,           na.rm = TRUE)
-  )
-
-df.LSME_wider %>% head() %>% knitr::kable(digits = 2)
-```
-
-### Correlations between measures
-
-```{r}
-#| code-fold: false
-
-GGally::ggpairs(
-  df.LSME_wider[, c("iSD", "diSD", "iCV",
-                    "MSSD", "MSSD_detrend", "rMSSD",
-                    "tau", "sigma", "mu")],
-  upper = list(continuous = GGally::wrap("cor", title = ""))
-) +
-  theme(axis.text  = element_text(size = 5),
-        strip.text = element_text(size = 5))
-```
 
 ## residual Standard Deviation (SD) from Linear Regression Model (lme4)
 
@@ -1126,7 +1084,7 @@ df.LSME %>% head() %>% knitr::kable()
 ```
 
 
-### Results
+### Highlighting the residual SD across all subjects
 
 ```{r}
 #| label: plot-lm
@@ -1148,7 +1106,6 @@ ggplot(df.LSME %>% distinct(subject, lm_sigma), aes(x = lm_sigma)) +
 Researchers from the [Lifespan Cognitive Dynamics Lab](https://lifespancognitivedynamics.com/) have developed openly available resources for DSEM such as a DSEM tutorial in R where the focus is less on variability, but more on the general framework and recent extensions such as modeling asymmetry in the autoregresive structure. The DSEM tutorial can be consulted [here](https://jessicaschaaf.github.io/jessicaschaaf/dsem-workshop.html) and the DSEM paper about DYNamics of ASymmetric TIme series (DYNASTI) can be found [here](https://doi.org/10.1080/10705511.2025.2519208).
 :::
 
-
 ### Description
 
 DSEM estimates within-subject variability as the standard deviation of the innovations — the residual spread around each subject's predicted trajectory. Here we fit a 4-parameter DSEM after accounting for the mean, linear systematic change, and the autoregressive structure where next to population-level fixed effects, random effects (individual differences in the subject-specific parameters) are estimated.
@@ -1163,8 +1120,7 @@ autoregressive parameter. Crucially, $\exp(\sigma + u_{4i})$ describes the the p
 
 
 ::: {.callout-note}
-In this tutorial, we fit a DSEM in Stan via `cmdstanr`. Sampling 4 chains with 1000
-iterations each is computationally intensive — expect some computation time.
+In this tutorial, we fit a DSEM in Stan via `cmdstanr`. Sampling 4 chains with 1000 iterations each is computationally intensive — expect some computation time.
 :::
 
 
@@ -1182,7 +1138,6 @@ Here we briefly explain each variable within the list.
 - **`subj`**: Integer index identifying which subject each row belongs to; used to look up that subject's random effects `u[subj, ...]`.
 - **`day`**: Integer index identifying which wave/day each row belongs to. *Not used in this model.*
 - **`Y_tm1`**: Lagged outcome (Y at the previous observation within the same day/wave); drives the autoregressive part: `(Y_tm1 - person_mean) * (phi + u[subj,3])`.
-- **`Y_tm1d`**: Lagged outcome from the previous day (cross-day lag). *Not used in this model.*
 - **`time`**: Within-day centred time of each observation; used in the linear time trend: `(time - mtime[subj]) * (beta + u[subj,2])`.
 - **`mtime`**: Each subject's mean time across observations (length = `N_subj`); centres the trend so the intercept reflects the person's mean level rather than time = 0.
 
@@ -1210,8 +1165,7 @@ dsem_list <- list(
   N       = nrow(df.LSME),
   mtime   = l2time,
   time    = df.LSME$ctime,
-  Y_tm1   = df.LSME$Y_tm1,
-  Y_tm1d  = df.LSME$Y_tm1d
+  Y_tm1   = df.LSME$Y_tm1
 )
 
 # Inspect list
@@ -1220,7 +1174,6 @@ str(dsem_list)
 
 
 #### Compile DSEM model
-
 
 ::: {.callout-note}
 The DSEM model code below is written in [Stan](https://mc-stan.org/) and 'vectorized' to optimize Bayesian sampling. You can learn more about 'Vectorization' [here](https://mc-stan.org/docs/2_18/stan-users-guide/vectorization.html) 
@@ -1434,8 +1387,7 @@ mcmc_hist(draws, c("alpha", "beta", "phi", "sigma",
 From `mcmc_trace` we see that each chain is mixing well (also more informally known as the 'hairy caterpillar plot') and from `mcmc_hist` we see histograms of the posterior draws for each parameter with all chains merged.
 
 
-#### Plot variability estimates
-
+#### Plot variability estimates for each subject
 
 ```{r}
 #| label: plot-dsem
@@ -1485,12 +1437,10 @@ Worthwhile attempts have been made across simulation studies to provide research
 
 Note that both papers evaluate different model structures (i.e., VAR vs. AR-1) and that both represent simulated scenarios in which the model specification comes from a known and correct data generating process. With real world data, the degree of model misspecification (e.g., non-linearity, non-stationarity etc.) comes into play which in turn impacts the posterior uncertainty of the parameter estimates. 
 
-Taking all together, we would recommend the following numbers to increase the probability for reliable DSEM estimates: 50-100 subjects (N) and 50-100 observations (T), but crucially, only treat these numbers as a starting point under ideal conditions. With lower amounts of subjects or observations, reliability in estimatingindividuals differences might become unstable. However, reliable estimating a DSEM only at the population-level should still be feasible. Complementary to sample- and observation size considerations, the cognitive system under study is a crucial factor to take into account when thinking about these numbers. This is where various model diagnostics become relevant to test whether certain statistical assumptions (e.g., stationarity, measurement error, non-linearity) hold true for a given population under study. Finally, rather than purely relying on recommendations for the number of subjects and observations, researchers can opt to run simulations with their expected effect sizes, type of missing data or relevant parameters to estimate (e.g., only mean + variability or mean + AR) since all of these factors might affect the penultimate reliability in the model estimates. 
+Taking all together, we would recommend the following numbers to increase the probability for reliable DSEM estimates: 50-100 subjects (N) and 50-100 observations (T), but crucially, only treat these numbers as a starting point under ideal conditions. With lower amounts of subjects or observations, reliability in estimating individuals differences might become unstable. However, reliable estimating a DSEM only at the population-level should still be feasible. Complementary to sample- and observation size considerations, the cognitive system under study is a crucial factor to take into account when thinking about these numbers. This is where various model diagnostics become relevant to test whether certain statistical assumptions (e.g., stationarity, measurement error, non-linearity) hold true for a given population under study. Finally, rather than purely relying on recommendations for the number of subjects and observations, researchers can opt to run simulations with their expected effect sizes, type of missing data or relevant parameters to estimate (e.g., only mean + variability or mean + AR) since all of these factors might affect the penultimate reliability in the model estimates. 
 
 Note that different software was used in both studies: [Jongerling, Liu & Williams, 2024](https://osf.io/preprints/psyarxiv/5fk8v_v1) wrote their models in [STAN](https://mc-stan.org/) and fitted them through the R package [CmdStanR](https://mc-stan.org/cmdstanr/), whereas [Schultzberg and Muthén 2018](https://doi.org/10.1080/10705511.2017.1392862) use [Mplus](https://www.statmodel.com/). 
 :::
-
-
 
 ## Drift Diffusion Modeling (DDM)
 
@@ -1507,7 +1457,8 @@ $$
 \text{RT} \sim \text{Wiener}(\delta, \alpha, \beta, \tau)
 $$
 
-Cognitive variability is often operationalized through the drift rate, where higher drift rates generally indicate that evidence is accumulated more consistently which would reflect more precise and accurate cognitive processing. 
+Cognitive variability is often operationalized through the drift rate, which represents the average rate of evidence accumulation and is commonly interpreted as reflecting the quality of information entering the decision process. In the standard DDM, holding other parameters constant, weaker drift toward the correct response generally produces slower and more variable response times. Thus, lower evidence quality can contribute to greater observed response-time variability even without an increase in the underlying processing noise.
+
 
 ::: {.callout-note}
 The DDM code is adapted from the `easyRT` tutorial by @makowski2026easyRT and the model is fit using R-package `brms`. Similar to DSEM, expect some sampling time.
@@ -1622,10 +1573,9 @@ saveRDS(m_ddm, "m_ddm.rds")
 #| cache: false
 
 m_ddm
-
 ```
 
-#### Plot parameter estimates
+#### Plot parameter estimates 
 
 ```{r}
 #| label: plot-ddm
@@ -1656,7 +1606,7 @@ as.data.frame(m_ddm) |>
 This DDM estimates population-level parameters. In order to get subject-specific drift rate estimates, like the subject-specific innovations in our DSEM, one would require a multilevel extension with random effects for each subject.
 :::
 
-### Overview of all measures (round 2)
+### Calculating the (dis)similarity between each measure
 ```{r}
 #| code-fold: false
 
@@ -1681,7 +1631,7 @@ df.LSME_wider <- df.LSME %>%
 df.LSME_wider %>% head() %>% knitr::kable(digits = 2)
 ```
 
-### Correlations between measures
+### Table with the correlations
 
 ```{r}
 #| code-fold: false
@@ -1706,14 +1656,14 @@ GGally::ggpairs(
 Relative Variability measures are suitable for double bounded data (e.g., VAS 0-100), but less suitable if the observed data have no double scale bounds (e.g., response times).
 :::
 
-### Overview of Relative Variability Estimates
+### Overview of Relative Variability measures
 | Variability Estimate | Conceptual Strength | Conceptual Limitation | Suits Data Type |
 |---|---|---|---|
 | **Relative Standard Deviation (iSD)** | Mean-corrected; removes dependency between mean and SD induced by bounded scales | Inflates variability estimates near scale bounds; assumes participants use the entire scale range; participants with mean at bounds should be excluded | Continuous bounded data (e.g., Likert, VAS, ESM affective ratings) |
 | **Relative RMSSD (rRMSSD)** | Mean-corrected; captures temporal instability independent of mean level; suitable for time-ordered data | Inflates estimates near bounds; requires time-ordered observations; conflates autocorrelation with innovations | Time-ordered bounded continuous data (e.g., ESM affective ratings) |
 | **Relative Interquartile Range (rIQR)** | Mean-corrected; robust to outliers compared to SD measures | Inflates estimates near bounds; less sensitive to extreme fluctuations; participants with mean at bounds should be excluded | Continuous bounded data, particularly with skewed distributions |
 | **Relative Range (rR)** | Mean-corrected; captures the full spread of scores relative to what is possible given the mean | Sensitive to outliers and extreme observations; inflates estimates near bounds; based on only two observations (min and max) | Continuous bounded data where entire range is of (theoretical) interest |
-: Overview of Relative Variability estimates, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
+: Overview of Relative Variability measures, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
 
 
 #### Step 1: Download the source files
@@ -1744,7 +1694,7 @@ What does each variable reflect?
 - **`CESD`**: Depression scale score
 
 
-#### Determine scale bounds
+##### Determine scale bounds
 
 ```{r}
 #| label: min-max
@@ -1755,10 +1705,10 @@ MAX_val <- max(ESMData$Sad, na.rm = TRUE)
 ```
 
 
-#### Step 3: Source the files from the folder you downloaded the source files to and estimate measures
+#### Step 3: Source the files from the folder where the download landed.
 ```{r}
 #| label: relvar-result
-#| code-fold: false
+#| code-fold: true
 #| eval: true
 
 source("bestDivision.R")
@@ -1894,7 +1844,7 @@ $$
 \end{cases}
 $$
 
-#### Results
+#### Highlight the results of each measure across all subjects
 
 ```{r}
 #| label: plot-relvar
@@ -1913,13 +1863,13 @@ results %>%
             hjust = -0.1, vjust = 2, size = 3.2, check_overlap = TRUE) +
   facet_wrap(~estimate, scales = "free_x") +
   theme_minimal() +
-  labs(title = "Distribution of relative variability estimates",
+  labs(title = "Distribution of relative variability measures",
        subtitle = "Dashed line = mean values across subjects",
        x = NULL, y = "Count")
 
 ```
 
-#### Correlations between relative variability estimates
+#### Correlations between relative variability measures
 
 ```{r}
 #| code-fold: false
@@ -1944,7 +1894,7 @@ A final extension of this tutorial concerns measures that are specifically tailo
 | **Sequential Error and Correct Dependency** | Easy to compute, standardized | Assumes stationarity | Binary (0/1) data |
 | **Binary Mean Square of Successive Differences (binMSSD)** | Easy to compute, standardized | Conflates autocorrelation with innovations and systematic changes | Binary (0/1) data |
 | **Windowed Variance** | Easy to compute, standardized | (Arbitrary) window size choice | Binary (0/1) data | 
-: Overview of Binary variability estimates, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
+: Overview of Binary variability measures, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
 
 We applied a 'standardization' procedure to each measure which allows for inter-measure comparisons of variability in binary data. All measures discussed below (except for the autocorrelation) are reported in standardized estimates. 
 
@@ -2033,7 +1983,7 @@ plot_meas = function(ts_df, meas, meas_name) {
 }
 ```
 
-##### Two simulated data
+##### Two simulated datasets
 Here, we simulate two data sets to illustrate the behaviour of the measures: 
 the first data set consists of fully random time series, which is useful for 
 checking the successful standardization of the measures:
@@ -2350,7 +2300,6 @@ binMSSD_real <- vector()
 for (row in 1:nrow(real_simdat)) {binMSSD_real[row] <- binMSSD(real_simdat[row,])}
 plot_meas(real_simdat, binMSSD_real, "Binary MSSD")
 ```
-
 
 
 ### Sequential Error and Correct Dependency (SED)
@@ -2708,7 +2657,7 @@ block below for a more detailed explanation.
 # extreme proportions correct
 ggplot(data.frame(x = ran_p[winVar_ran < -.09]), aes(x = x)) +
   geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
-  labs(title = "Proportions correct for winVar < -.09",
+  labs(title = "Proportions correct for Windowed Variance < -.09",
        x = "Proportion correct", y = "Count") +
   theme_minimal()
 
@@ -2720,7 +2669,7 @@ ggplot(data.frame(x = ran_p[winVar_ran < -.09]), aes(x = x)) +
 meas_50 <- winVar_ran[ran_p == .50]
 ggplot(data.frame(x = meas_50), aes(x = x)) +
   geom_histogram(bins = 30, fill = "#4C72B0", colour = "white", alpha = .8) +
-  labs(title = "winVar distribution for p = .50",
+  labs(title = "Windowed Variance distribution for p = .50",
        x = "winVar", y = "Count") +
   theme_minimal()
 
@@ -2731,7 +2680,7 @@ ggplot(data.frame(x = meas_50), aes(x = x)) +
 meas_97 <- winVar_ran[ran_p == .97]
 ggplot(data.frame(x = meas_97), aes(x = x)) +
   geom_histogram(bins = 30, fill = "#4C72B0", colour = "white", alpha = .8) +
-  labs(title = "winVar distribution for p = .97",
+  labs(title = "Windowed Variance distribution for p = .97",
        x = "winVar", y = "Count") +
   theme_minimal()
 ```
@@ -2751,8 +2700,8 @@ GGally::ggpairs(
   real_meas,
   upper = list(continuous = GGally::wrap("cor", title = ""))
 ) +
-  theme(axis.text  = element_text(size = 5),
-        strip.text = element_text(size = 5))
+  theme(axis.text  = element_text(size = 8),
+        strip.text = element_text(size = 8))
 ```
 
 ```{r}
@@ -2762,9 +2711,9 @@ cor(real_meas, use = "complete.obs") %>%
   round(2) %>% 
   knitr::kable()
 ```
-# Conclusion 
 
-Throughout this tutorial, we hope to have illustrated the breadth of statistical measures, each with different strengths and weaknesses, with which researchers can estimate cognitive variability across different data types. This will help further empirical investigation of cognitive variability across a wide range of contexts, tasks and settings. Depending on the scientific question, cognitive process studied, experimental task design and the type of data collected, researchers can make an informed choice among the available measures 
+# Conclusion 
+Throughout this tutorial, we have illustrated the breadth of statistical measures that quantify Cognitive Variability across diffferent types of data. This tutorial will help further empirical investigation of cognitive variability across a wide range of cognitive tasks and experimental settings and enables researchers to make an informed choice among the available measures. 
 
 
 ::: {.callout-note appearance="minimal"}
