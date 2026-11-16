@@ -30,10 +30,6 @@ format:
     fig-width: 7
     fig-height: 4.5
     fig-align: center
-    include-in-header:
-      text: |
-        <script data-goatcounter="https://jorvlan.goatcounter.com/count"
-                async src="//gc.zgo.at/count.js"></script>
     
 execute:
   echo: true
@@ -47,17 +43,12 @@ categories:
   - open science           
 
 ---
-```{=html}
-<a href="https://jorvlan.goatcounter.com">
-  <img src="https://img.shields.io/badge/page%20views-click%20to%20see-blue?style=flat-square"
-       alt="Views"/>
-</a>
-```
 
 ::: {.callout-note appearance="minimal"}
 **How to cite this tutorial:**
 
-van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: A narrative review of cognitive fluctuation in childhood and adolescence. JOURNAL. DOI:
+van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: 
+A narrative review of cognitive fluctuation in childhood and adolescence and hands-on tutorial in quantifying (cognitive) variability. JOURNAL. DOI:
 :::
 
 # Introduction
@@ -157,7 +148,7 @@ library(easyRT)
 
 ## Simulated data
 
-Here we simulate a dataset typical of Intensive Longitudinal Data (ILD) which is common in experience sampling (ESM) studies. Specifically, we simulate data for 100 subjects, having performed 50 trials on a single day. 
+Here we simulate a dataset typical of Intensive Longitudinal Data (ILD) which is common in experience sampling (ESM) studies. Specifically, we simulate data for 100 subjects, having performed 100 trials on a single day. We also added random noise to the observed scores (reflecting measurement error), allowing us to separate measurement error from the innovations with DSEM. 
 
 The data is in long format where rows represent trials and columns represent the variables. The R code that simulates these data is directly available [here](https://raw.githubusercontent.com/jorvlan/cognitive_variability_review_project/refs/heads/main/measures/sim_data_review.R).
 
@@ -181,7 +172,7 @@ ggplot(df.LSME, aes(x = time, y = y, group = subject, color = factor(subject))) 
   geom_hline(yintercept = mean(df.LSME$y, na.rm = TRUE),
              linetype = "dashed", color = "black") +
   guides(color = "none") +
-  labs(title = "Simulated time series for 100 subjects with 50 trials",
+  labs(title = "Simulated time series for 100 subjects with 100 trials",
        subtitle = "Dashed line reflects the mean across all subjects and trials\nEach line is a subject",
        x = "Trial", y = "Y") +
   theme_minimal()
@@ -197,12 +188,12 @@ df.LSME %>% head() %>% knitr::kable()
 
 What does each variable reflect?
 
-- **`subject`**: Number of unique subjects (i.e., 1-100)
+- **`subject`**: Subject ID (i.e., 1-100)
 - **`wave`**: Amount of data collection 'waves' in this dataset (i.e., 1).
-- **`time`**: Total number of unique trials within a day/wave. (i.e., 1-50) 
+- **`time`**: Trial number (i.e., 1-100) 
 - **`y`**: Vector of the cognitive time series data (e.g., log-transformed response times).
 - **`Y_tm1`**: Lagged outcome (y at the previous observation within the same day/wave); drives the autoregressive part in models that take autoregression into account. Note that the first value reflects the mean as no lagged value can be computed from the first observation. 
-- **`ctime`**: Running trial number, but **`time`** divided by 100 to ease the sampler in linear systematic change estimation in e.g., DSEM. 
+- **`ctime`**:**`time`** divided by the number of trials (100) to ease the sampler in linear systematic change estimation in DSEM. 
 - **`mtime`**: Each subject's mean time across observations. This ensures a within-person centered trend so the intercept reflects the person's mean level rather than time = 0.
 
 
@@ -216,14 +207,14 @@ What does each variable reflect?
 |---|---|---|---|
 | **intraindividual Standard Deviation (iSD)** | Easy to compute, suitable for continuous data | Not suitable for binary data (mean dependency); potentially conflates distinct characteristics of cognitive performance (e.g., learning effects, measurement error, autocorrelation) | Continuous data (e.g., response times) |
 | **Detrended iSD (residual iSD)** | Easy to compute, suitable for continuous data | Not suitable for binary data (mean dependency); uses residuals as data | Continuous data (e.g., response times) |
-| **Dynamic Structural Equation Modeling (Innovations)** | Flexible and extendible modeling framework; hierarchical modeling allows estimation of random effects across multiple levels; can separate measurement error from innovations | Less suitable for binary data; difficult to implement outside proprietary software; Bayesian sampling can be computationally intensive | Time-series data, Intensive Longitudinal Data (ILD), N = 1, N > 1 |
+| **Dynamic Structural Equation Modeling (Innovations)** | Flexible and extendible modeling framework; hierarchical modeling allows estimation of random effects across multiple levels; extensions can separate measurement error from innovations | Less suitable for binary data; difficult to implement outside proprietary software; Bayesian sampling can be computationally intensive | Time-series data, Intensive Longitudinal Data (ILD), N = 1, N > 1 |
 | **Mean Square of Successive Differences (MSSD)** | Easy to compute, suitable for binary data | Conflates autocorrelation with innovations and systematic changes | Binary (0/1) data, continuous data |
 | **Detrended MSSD** | Easy to compute, suitable for binary data | Conflates autocorrelation with innovations; uses residuals as data | Binary (0/1) data, continuous data |
 | **root MSSD** | Easy to compute, suitable for binary data; outcome expressed in original raw units (easier for interpretation than MSSD) | Conflates autocorrelation with innovations and systematic changes | Binary(0/1) data, continuous data |
 | **Ex-Gaussian Tau** | Suitable for continuous data; does not assume a Gaussian distribution | Not suitable for binary data | Continuous data (e.g., response times) |
 | **intraindividual Coefficient of Variation (iCV)** | Easy to compute, not mean dependent | Not suitable for binary data; assumes linear relationship between mean and SD | Continuous data (e.g., response times) |
 | **Drift Diffusion Modeling (Drift/Delta)** | Takes into account speed/accuracy tradeoffs; theoretically interpretable parameters for a subset of choice-response time tasks | Difficult to extend to a wide battery of cognitive tasks and measures | Response time and binary accuracy data |
-| **Gaussian Random-Effects (lme4)** | Easy to estimate for N = 1 data; can examine variability at multiple timescales | Difficulty estimating individual differences in variability components; variability estimates do not benefit from partial pooling | Continuous data (e.g., response times) 
+| **Gaussian Random-Effects (Linear regression model lm() )** | Easy to estimate for N = 1 data; can examine variability at multiple timescales | Difficulty estimating individual differences in variability components; variability estimates do not benefit from partial pooling | Continuous data (e.g., response times) 
 
 
 : Overview of variability measures, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
@@ -509,7 +500,7 @@ ggplot(df.LSME %>% filter(subject %in% sample_ids_isd),
   scale_color_viridis_c(option = "magma", name = "Residual²") +
   facet_wrap(~subject, labeller = labeller(subject = facet_labels_isd_only)) +
   labs(title = "Polynomial (2nd order) trend fit per subject",
-       subtitle = "Point color reflects squared deviation from linear trend")
+       subtitle = "Point color reflects squared deviation from trend")
 
 ```
 
@@ -956,7 +947,7 @@ sub_id <- unique(df.LSME$subject)[1:20]
 for (subj in sub_id) {
   tryCatch({
     subject_data <- df.LSME %>% filter(subject == subj)
-    fit <- BayesianExgaussian(n = 50, x = subject_data$y_shifted,
+    fit <- BayesianExgaussian(n = nrow(subject_data), x = subject_data$y_shifted,
                           nSamples = 500, Ti = 250)
     subject_exGauss <- rbind(subject_exGauss,
                              data.frame(subject = subj,
@@ -1103,20 +1094,21 @@ ggplot(df.LSME %>% distinct(subject, lm_sigma), aes(x = lm_sigma)) +
 ## Dynamic Structural Equation Modeling (DSEM)
 
 ::: {.callout-tip}
-Researchers from the [Lifespan Cognitive Dynamics Lab](https://lifespancognitivedynamics.com/) have developed openly available resources for DSEM such as a DSEM tutorial in R where the focus is less on variability, but more on the general framework and recent extensions such as modeling asymmetry in the autoregresive structure. The DSEM tutorial can be consulted [here](https://jessicaschaaf.github.io/jessicaschaaf/dsem-workshop.html) and the DSEM paper about DYNamics of ASymmetric TIme series (DYNASTI) can be found [here](https://doi.org/10.1080/10705511.2025.2519208).
+Researchers from the [Lifespan Cognitive Dynamics Lab](https://lifespancognitivedynamics.com/) have developed openly available resources for DSEM where the focus is less on quantifying cognitive variability, but more on the general DSEM framework and includes novel extensions of the DSEM farmework such as modeling asymmetry in the autoregresive structure. This DSEM tutorial can be consulted [here](https://jessicaschaaf.github.io/jessicaschaaf/dsem-workshop.html) and the published paper about modeling asymmetric autoregression can be found [here](https://doi.org/10.1080/10705511.2025.2519208).
 :::
 
 ### Description
 
-DSEM estimates within-subject variability as the standard deviation of the innovations — the residual spread around each subject's predicted trajectory. Here we fit a 4-parameter DSEM after accounting for the mean, linear systematic change, and the autoregressive structure where next to population-level fixed effects, random effects (individual differences in the subject-specific parameters) are estimated.
-
+DSEM estimates within-subject variability as the standard deviation of the innovations — which are the 'random shocks' creating deviations from a predicted trajectory. Here we fit a 4-parameter DSEM after accounting for the mean, linear systematic change, and the autoregressive structure where next to population-level fixed effects, random effects (individual differences in the subject-specific parameters) are estimated.
 
 $$
-y_{it} \sim \mathcal{N}\left(\alpha_i + \beta_i(t - \bar{t}_i) + \phi_i(y_{i,t-1} - \alpha_i),\ \exp(\sigma + u_{4i})\right)
+\begin{aligned}
+y_{it} &\sim \mathcal{N}\!\left(\mu_{it} + \phi_i\,(y_{i,t-1} - \mu_{i,t-1}),\ \exp(\sigma + u_{4i})\right) \\[4pt]
+\mu_{it} &= \alpha_i + \beta_i\,(t - \bar{t}_i)
+\end{aligned}
 $$
 
-where $\alpha_i$ is the subject mean, $\beta_i$ is the systematic change over time (trend) and $\phi_i$ is the
-autoregressive parameter. Crucially, $\exp(\sigma + u_{4i})$ describes the the population level variability through $\sigma$ and the individual differences or random effects are indicated by $u_{4i}$. This is the key parameter of interest for estimating cognitive variability and quantifies how much subjects differ from each other in their variability over and above systematic change and autocorrelation.
+where $\alpha_i$ is the subject mean, $\beta_i$ is the systematic change over time (trend), $\mu_{it}$ is the person-specific trajectory and $\phi_i$ is the autoregressive parameter, which acts on the deviation from that trajectory at the previous trial. Crucially, $\exp(\sigma + u_{4i})$ describes the population level variability through $\sigma$ and the individual differences or random effects are indicated by $u_{4i}$. This is the key parameter of interest for estimating cognitive variability and quantifies how much subjects differ from each other in their variability over and above systematic change and autocorrelation.
 
 
 ::: {.callout-note}
@@ -1130,15 +1122,13 @@ Stan, the language we specify our DSEM in, requires data to be formatted in a li
 
 Here we briefly explain each variable within the list.
 
+- **`N`**: Total number of observations (rows).
 - **`N_subj`**: Number of unique subjects; determines the size of subject-level random effect vectors.
-- **`Y`**: Vector of the time series data (outcome variable being modelled).
-- **`N_obs`**: Total number of unique trials within a day/wave. *Not used in this model.*
-- **`N_days`**: Number of days. *Not used in this model.*
-- **`N`**: Total number of observations (rows); used as the main loop bound throughout the model.
 - **`subj`**: Integer index identifying which subject each row belongs to; used to look up that subject's random effects `u[subj, ...]`.
-- **`day`**: Integer index identifying which wave/day each row belongs to. *Not used in this model.*
-- **`Y_tm1`**: Lagged outcome (Y at the previous observation within the same day/wave); drives the autoregressive part: `(Y_tm1 - person_mean) * (phi + u[subj,3])`.
-- **`time`**: Within-day centred time of each observation; used in the linear time trend: `(time - mtime[subj]) * (beta + u[subj,2])`.
+- **`Y`**: Vector of the time series data (outcome variable being modelled).
+- **`Y_tm1`**: Lagged outcome (Y at the previous trial of the same subject); drives the autoregressive part `(Y_tm1 - mu_prev) * (phi + u[subj,3])`. The first value of each subject is the subject's mean, as no lagged value exists for the first trial.
+- **`time`**: Rescaled (0.01-1) trial counter of each observation; used in the linear trend `(time - mtime[subj]) * (beta + u[subj,2])`.
+- **`time_tm1`**: Rescaled trial counter of the previous trial; used to compute the person's trajectory at t − 1 (`mu_prev`), so the autoregression acts on the deviation from that trajectory.
 - **`mtime`**: Each subject's mean time across observations (length = `N_subj`); centres the trend so the intercept reflects the person's mean level rather than time = 0.
 
 #### Create list for DSEM
@@ -1148,28 +1138,40 @@ Here we briefly explain each variable within the list.
 #| label: method-dsem-data
 #| code-fold: false
 
+# Order by subject and trial
+dat <- df.LSME %>%
+  mutate(subj = as.integer(factor(subject))) %>%
+  arrange(subj, time)
+
 # Create vector with centering variable for the mean
-l2time <- df.LSME %>%
-  group_by(subject) %>%
-  summarise(mtime = mean(ctime, na.rm = TRUE)) %>%
+l2time <- dat %>%
+  group_by(subj) %>%
+  summarise(mtime = mean(ctime, na.rm = TRUE), .groups = "drop") %>%
   pull(mtime)
 
 # Create list for DSEM
 dsem_list <- list(
-  N_subj  = length(unique(as.numeric(as.factor(df.LSME$subject)))),
-  Y       = df.LSME$y,
-  N_obs   = length(unique(df.LSME$time)),
-  N_days  = length(unique(as.numeric(as.factor(df.LSME$wave)))),
-  subj    = as.numeric(as.factor(df.LSME$subject)),
-  day     = as.numeric(as.factor(df.LSME$wave)),
-  N       = nrow(df.LSME),
-  mtime   = l2time,
-  time    = df.LSME$ctime,
-  Y_tm1   = df.LSME$Y_tm1
+  N        = nrow(dat),
+  N_subj   = max(dat$subj),
+  subj     = dat$subj,
+  Y        = dat$y,
+  Y_tm1    = dat$Y_tm1,
+  time     = dat$ctime,
+  time_tm1 = dat$ctime - 1 / length(unique(dat$time)),  # rescaled time of the previous trial
+  mtime    = l2time
 )
 
 # Inspect list
 str(dsem_list)
+
+stopifnot(
+  "NA in Y"              = !anyNA(dsem_list$Y),
+  "NA in Y_tm1"          = !anyNA(dsem_list$Y_tm1),
+  "NA in time"           = !anyNA(dsem_list$time),
+  "NA in mtime"          = !anyNA(dsem_list$mtime),
+  "duplicated trials"    = !any(duplicated(dat[c("subj", "time")])),
+  "wrong number of rows" = nrow(dat) == 100 * 100
+)
 ```
 
 
@@ -1180,22 +1182,19 @@ The DSEM model code below is written in [Stan](https://mc-stan.org/) and 'vector
 :::
 
 ::: {.callout-note}
-Fitting a DSEM in R requires CmdStan, which is sometimes not a trivial installation. What is needed to make this work: (1) install the C++ toolchain
+Fitting a DSEM in R requires CmdStan, which is sometimes not a trivial installation. See the install packages section with an explainer how to install the required software.
 :::
 
 ```{r}
 #| label: method-dsem-compile
 #| code-fold: false
 
-
-
-
 dsem_standard <- "
 //-----------------------------------------------//
 // Dynamic Structural Equation Model (DSEM):
 // Estimates intra-individual trajectories in Y (alpha) over time,
 // while simultaneously taking into account the autocorrelation (phi), systematic change by a linear trend (beta),
-// and residual variance (sigma), and allowing individuals to differ in these effects. (random effects).
+// and residual variance (sigma), and allowing individuals to differ in these effects (random effects).
 // The model code is written in Stan and vectorized 
 // see https://mc-stan.org/ and https://mc-stan.org/docs/2_18/stan-users-guide/vectorization.html
 // To make the model specification easier to digest, we provide short comments for each section.
@@ -1205,10 +1204,11 @@ data {
   int<lower = 1> N; // total number of trials
   int<lower = 1> N_subj; // total number of subjects
   array[N] int<lower=1, upper=N_subj> subj; // subject index for each trial
-  vector[N] Y; // outcome variable (RT)
-  vector[N] time; // running trial number of Y
+  vector[N] Y; // outcome variable
   vector[N] Y_tm1; // lagged outcome variable (Y at t-1)
-  vector[N_subj] mtime; // within-person mean time centered (for the linear trend)
+  vector[N] time; // rescaled trial number of Y
+  vector[N] time_tm1; // rescaled trial number of the previous trial
+  vector[N_subj] mtime; // within-person mean time (for centering the linear trend)
 }
 parameters {
   real sigma; // Population-level residual SD (log-scale)
@@ -1218,7 +1218,7 @@ parameters {
   real phi; // Population-level autocorrelation
   matrix[4, N_subj] z_u; // Random effects (non-centered parameterization)
   cholesky_factor_corr[4] L_u; // Cholesky factor of random effects correlation matrix
-                              // see https://bruno.nicenboim.me/bayescogsci/ch-complexstan.html#sec-corrstan
+                               // see https://bruno.nicenboim.me/bayescogsci/ch-complexstan.html#sec-corrstan
 }
 transformed parameters {
   matrix[N_subj,4] u; // subject-specific random effects (alpha, beta, phi, sigma)
@@ -1227,6 +1227,10 @@ transformed parameters {
 }
 
 model {
+  // subject-specific trajectory at the current and at the previous trial
+  vector[N] mu      = alpha + u[subj,1] + (time     - mtime[subj]) .* (beta + u[subj,2]);
+  vector[N] mu_prev = alpha + u[subj,1] + (time_tm1 - mtime[subj]) .* (beta + u[subj,2]);
+
   // population-level priors
   alpha ~ normal(0, 50); // population-level mean prior
   phi   ~ normal(0, 50); // population-level autocorrelation prior
@@ -1238,29 +1242,16 @@ model {
   to_vector(z_u) ~ std_normal();
   L_u ~ lkj_corr_cholesky(1); // LKJ prior 1 (uniform across correlation matrices)
 
-  // likelikhood
-  // mean = intercept + subject-specific deviation +
-  //        person-mean centered time +
-  //        autocorrelation of deviations from intercept 
-  //        residual SD = exp(sigma); on log-scale to assume normal distribution which simplifies estimation
-  Y ~ normal(alpha + u[subj,1] + (time - mtime[subj]).*(beta+u[subj,2]) + 
-             (Y_tm1 - (alpha + u[subj,1])).*(phi+u[subj,3]),
-             exp(sigma + u[subj,4])); 
+  // likelihood
+  // mean = person-specific trajectory +
+  //        autocorrelation of the previous deviation from that trajectory
+  // residual SD = exp(sigma + u4); on log-scale to assume normal distribution which simplifies estimation
+  Y ~ normal(mu + (Y_tm1 - mu_prev) .* (phi + u[subj,3]),
+             exp(sigma + u[subj,4]));
 }
 generated quantities {
   // retrieve correlation matrix from Cholesky factor
   corr_matrix[4] rho_u = L_u * L_u';
-  // pointwise log-likelihood (used for model comparison e.g., LOO-CV)
-  vector[N] log_lik;
-    
-  for (i in 1:N) {
-    log_lik[i] = normal_lpdf(Y[i] | alpha + u[subj[i],1] +
-      (time[i] - mtime[subj[i]]).*(beta+u[subj[i],2]) +
-      (Y_tm1[i] - (alpha + u[subj[i],1])).*(phi+u[subj[i],3]),
-      exp(sigma + u[subj[i],4]));
-  }
-  // sum of log-likelihoods
-  real sum_ll = sum(log_lik);
 }
 "
 
@@ -1269,7 +1260,7 @@ generated quantities {
 writeLines(dsem_standard, "dsem_standard.stan") 
 
 # Reload the model code and apply stanc optimization for efficient sampling (see https://mc-stan.org/docs/stan-users-guide/using-stanc.html)
-model2 <- cmdstan_model(
+model_dsem <- cmdstan_model(
   "dsem_standard.stan",
   stanc_options = list("O1")
 )
@@ -1281,32 +1272,37 @@ model2 <- cmdstan_model(
 #| label: method-dsem-fit
 #| code-fold: false
 #| cache: false
-#| eval: !expr "!file.exists('fit2.rds')"
+#| eval: !expr "!file.exists('fit_dsem.rds')"
 
 # Verify data before fitting
 stopifnot(
   is.list(dsem_list),
-  exists("model2")
+  exists("model_dsem")
 )
 
 # Fit the model
-fit2 <- model2$sample(
+fit_dsem <- model_dsem$sample(
   dsem_list,
-  chains = 4,
-  parallel_chains = 2,
-  iter_warmup = 500,
-  iter_sampling = 1000,
-  save_warmup = FALSE,
+  chains          = 4,
+  parallel_chains = 4,
+  iter_warmup     = 1000,
+  iter_sampling   = 1000,
+  save_warmup     = FALSE,
+  seed            = 2094,
   refresh         = 100
 )
 
-# save the fit object
-fit2$save_object("fit2.rds") 
+# save the fit object (only if sampling succeeded)
+if (all(fit_dsem$return_codes() == 0)) {
+  fit_dsem$save_object("fit_dsem.rds")
+} else {
+  stop("Sampling failed:\n", paste(tail(fit_dsem$output(1), 15), collapse = "\n"))
+}
 ```
 
 ::: {.callout-note}
-The model was fit using 4 chains with 500 warmup and 1000 sampling 
-iterations each, run on 2 parallel chains, resulting in 4000 
+The model was fit using 4 chains with 1000 warmup and 1000 sampling 
+iterations each, run on 4 parallel chains, resulting in 4000 
 post-warmup draws total.
 :::
 
@@ -1315,7 +1311,7 @@ post-warmup draws total.
 #| label: method-dsem-load
 #| code-fold: false
 #| cache: false
-fit2 <- readRDS("fit2.rds")
+fit_dsem <- readRDS("fit_dsem.rds")
 ```
 
 
@@ -1324,11 +1320,11 @@ fit2 <- readRDS("fit2.rds")
 #| label: method-dsem-draws
 #| code-fold: false
 # Extract draws of parameters for table
-draws <- fit2$draws(format = "df", c("alpha", "beta", "phi", "sigma",
-                                      "tau_u[1]", "tau_u[2]", "tau_u[3]",
-                                      "tau_u[4]")) 
+draws <- fit_dsem$draws(format = "df", c("alpha", "beta", "phi", "sigma",
+                                         "tau_u[1]", "tau_u[2]", "tau_u[3]",
+                                         "tau_u[4]")) 
 
-sum2 <- posterior::summarise_draws(
+sum_dsem <- posterior::summarise_draws(
   draws,
   "mean",
   "median",
@@ -1340,7 +1336,7 @@ sum2 <- posterior::summarise_draws(
   "ess_tail"
 )
 
-print2<-print(sum2) # print parameters
+print_dsem <- print(sum_dsem) # print parameters
 
 ```
 
@@ -1371,16 +1367,25 @@ Key information about each resulting parameter estimate:
 
 
 #### Additional diagnostic checks for model convergence
+
+Next to Rhat and ESS, Stan reports sampler-level diagnostics. Divergent transitions indicate that the sampler could not explore part of the posterior reliably; ideally there are none. Hitting the maximum treedepth signals inefficient sampling, and a low E-BFMI (below about 0.3) points to poor exploration of the posterior as a whole.
+
+```{r}
+#| label: method-dsem-sampler-diagnostics
+#| code-fold: false
+fit_dsem$diagnostic_summary()
+```
+
 ```{r}
 #| label: method-dsem-diagnostics
 #| code-fold: false
 mcmc_trace(draws, c("alpha", "beta", "phi", "sigma",
-                               "tau_u[1]", "tau_u[2]", "tau_u[3]",
-                               "tau_u[4]"))
+                    "tau_u[1]", "tau_u[2]", "tau_u[3]",
+                    "tau_u[4]"))
                                
 mcmc_hist(draws, c("alpha", "beta", "phi", "sigma",
-                             "tau_u[1]", "tau_u[2]", "tau_u[3]",
-                             "tau_u[4]"))
+                   "tau_u[1]", "tau_u[2]", "tau_u[3]",
+                   "tau_u[4]"))
 
 ```
 
@@ -1392,9 +1397,9 @@ From `mcmc_trace` we see that each chain is mixing well (also more informally kn
 ```{r}
 #| label: plot-dsem
 #| code-fold: false
-# Extract subject-level innovation SD (exp(sigma + u[,4]))
-u_draws <- fit2$draws(variables = "u", format = "df")
-sigma_draws <- fit2$draws(variables = "sigma", format = "df")
+# Extract subject-level residual SD (exp(sigma + u[,4]))
+u_draws <- fit_dsem$draws(variables = "u", format = "df")
+sigma_draws <- fit_dsem$draws(variables = "sigma", format = "df")
 
 # Reshape u4
 u4 <- u_draws %>%
@@ -1430,6 +1435,183 @@ ggplot(sd_summary, aes(x = subject, y = mean)) +
 
 ```
 
+#### Subject-specific estimates
+
+```{r}
+#| label: dsem-person
+#| code-fold: false
+
+# theta_i = fixed effect + random effect, draw by draw.
+# Row j of subj_tau is subject j, and `subject` is gl(nsubj, k), so the
+# ordering already matches dat$subj. No realignment is needed.
+
+get_u_draws <- function(fit, k) {
+  nm <- sprintf("u[%d,%d]", seq_len(dsem_list$N_subj), k)
+  posterior::as_draws_matrix(fit$draws(variables = nm))[, nm, drop = FALSE]
+}
+
+person_draws <- function(fit, fixed, k) {
+  ud <- get_u_draws(fit, k)
+  fd <- as.vector(posterior::as_draws_matrix(fit$draws(variables = fixed)))
+  sweep(ud, MARGIN = 1, STATS = fd, FUN = "+")
+}
+
+draws_alpha_i <- person_draws(fit_dsem, "alpha", 1)
+draws_beta_i  <- person_draws(fit_dsem, "beta",  2)
+draws_phi_i   <- person_draws(fit_dsem, "phi",   3)
+draws_logsd_i <- person_draws(fit_dsem, "sigma", 4)
+
+dsem_person <- data.frame(
+  subject    = unique(dat$subject),
+  dsem_alpha = colMeans(draws_alpha_i),
+  dsem_beta  = colMeans(draws_beta_i),
+  dsem_phi   = colMeans(draws_phi_i),
+  dsem_sigma = colMeans(exp(draws_logsd_i))
+)
+
+dsem_person %>% head() %>% knitr::kable(digits = 3)
+
+df.LSME <- df.LSME %>% left_join(dsem_person, by = "subject")
+```
+
+
+#### Reliability of the subject-specific estimates
+
+```{r}
+#| label: reliability
+#| code-fold: false
+
+#            Var(E[u_i | Y])
+#   Rel = -----------------------------------
+#         Var(E[u_i | Y]) + Mean(Var[u_i | Y])
+#
+# Computed on the RANDOM EFFECTS for all four, so every row sits on the same
+# basis. Mixing random effects for some rows and full parameters for others
+# makes the denominators non-comparable.
+
+reliability <- function(dr) {
+  pm <- colMeans(dr); pv <- apply(dr, 2, var)
+  s  <- var(pm);      e  <- mean(pv)
+  c(reliability = s / (s + e), signal_var = s, estimation_var = e)
+}
+
+rel <- t(vapply(1:4, function(k) reliability(get_u_draws(fit_dsem, k)), numeric(3)))
+rownames(rel) <- c("intercept", "trend", "AR(1)", "log residual SD")
+
+rel %>% knitr::kable(digits = 4)
+```
+
+
+::: {.callout-tip collapse="true" title="Does the model recover the true values?"}
+
+```{r}
+#| label: recovery-load-truth
+#| code-fold: false
+
+gh <- "https://raw.githubusercontent.com/jorvlan/cognitive_variability_review_project/refs/heads/main/measures/"
+gtruth   <- readRDS(gzcon(url(paste0(gh, "gtruth.rds"))))
+subj_tau <- readRDS(gzcon(url(paste0(gh, "subj_tau.rds"))))
+```
+
+##### Population recovery against gtruth
+
+```{r}
+#| label: recovery-population
+#| code-fold: false
+
+pop_vars <- c("alpha", "beta", "phi", "sigma",
+              paste0("tau_u[", 1:4, "]"),
+              as.vector(outer(1:4, 1:4,
+                              function(i, j) paste0("rho_u[", i, ",", j, "]"))))
+
+summ <- fit_dsem$summary(variables = pop_vars,
+                         mean, sd, ~quantile(.x, probs = c(0.05, 0.95)),
+                         posterior::default_convergence_measures())
+
+recovery <- summ %>%
+  dplyr::rename(.variable = variable, q5 = `5%`, q95 = `95%`) %>%
+  dplyr::left_join(gtruth, by = ".variable") %>%
+  dplyr::mutate(error   = mean - Value,
+                covered = Value >= q5 & Value <= q95)
+
+recovery %>% knitr::kable(digits = 3)
+
+cat("90% intervals covering the truth: ",
+    sum(recovery$covered, na.rm = TRUE), " of ",
+    sum(!is.na(recovery$Value)), "\n", sep = "")
+```
+
+##### Person-specific parameters: recovery
+
+```{r}
+#| label: recovery-person
+#| code-fold: false
+
+## Fixed-effect values are pulled from gtruth by name, so nothing is
+## hard-coded and the scales cannot drift apart.
+
+gt <- setNames(gtruth$Value, gtruth$.variable)
+Tn <- length(unique(df.LSME$time))       # the same rescaling gtruth applies
+
+truth_person <- list(
+  alpha_i = gt[["alpha"]] + subj_tau[, 1],
+  beta_i  = gt[["beta"]]  + subj_tau[, 2] * Tn,   # both on the ctime scale
+  phi_i   = gt[["phi"]]   + subj_tau[, 3],
+  logsd_i = gt[["sigma"]] + subj_tau[, 4]
+)
+## NOTE on logsd_i: DataGen sd_i also carries
+##   (time - mtime) * (alpha1 + subj5.tau)
+## with alpha1 = 0 and sd.subj_tau[5] = 0.0001, i.e. at most about 0.005 in
+## log units across the block. The model treats the residual SD as constant
+## within a person, which is right to that tolerance.
+
+recover_person <- function(dr, truth, level = 0.90) {
+  a   <- (1 - level) / 2
+  est <- colMeans(dr)
+  lo  <- apply(dr, 2, quantile, probs = a)
+  hi  <- apply(dr, 2, quantile, probs = 1 - a)
+  c(correlation = cor(truth, est),
+    rmse        = sqrt(mean((est - truth)^2)),
+    bias        = mean(est - truth),
+    coverage_90 = mean(truth >= lo & truth <= hi))
+}
+
+person_tab <- rbind(
+  intercept         = recover_person(draws_alpha_i, truth_person$alpha_i),
+  trend             = recover_person(draws_beta_i,  truth_person$beta_i),
+  `AR(1)`           = recover_person(draws_phi_i,   truth_person$phi_i),
+  `log residual SD` = recover_person(draws_logsd_i, truth_person$logsd_i)
+)
+
+# Correlation with truth is the honest check; the reliability above
+# is model-internal and can be high for a model that recovers badly.
+
+person_tab %>% knitr::kable(digits = 4)
+```
+
+```{r}
+#| label: recovery-person-plot
+#| code-fold: false
+
+pp <- bind_rows(
+  data.frame(par = "intercept",       truth = truth_person$alpha_i, est = dsem_person$dsem_alpha),
+  data.frame(par = "trend",           truth = truth_person$beta_i,  est = dsem_person$dsem_beta),
+  data.frame(par = "AR(1)",           truth = truth_person$phi_i,   est = dsem_person$dsem_phi),
+  data.frame(par = "log residual SD", truth = truth_person$logsd_i, est = colMeans(draws_logsd_i))
+)
+pp$par <- factor(pp$par, levels = c("intercept", "trend", "AR(1)", "log residual SD"))
+
+ggplot(pp, aes(truth, est)) +
+  geom_abline(intercept = 0, slope = 1, linetype = 2) +
+  geom_point(alpha = 0.6) +
+  facet_wrap(~par, scales = "free") +
+  labs(x = "True subject-specific value", y = "Posterior mean",
+       title = "Recovery of subject-specific DSEM parameters") +
+  theme_bw()
+```
+
+:::
+
 See [Aristodemou, M. E. (2025). The temporal instability of cognitive performance (Doctoral dissertation)](https://doi.org/10.54195/9789465151182) for more information on the drawbacks of using simple measures like e.g., iSD and iCV in comparison to DSEM. 
 
 ::: {.callout-note}
@@ -1440,6 +1622,8 @@ Note that both papers evaluate different model structures (i.e., VAR vs. AR-1) a
 Taking all together, we would recommend the following numbers to increase the probability for reliable DSEM estimates: 50-100 subjects (N) and 50-100 observations (T), but crucially, only treat these numbers as a starting point under ideal conditions. With lower amounts of subjects or observations, reliability in estimating individuals differences might become unstable. However, reliable estimating a DSEM only at the population-level should still be feasible. Complementary to sample- and observation size considerations, the cognitive system under study is a crucial factor to take into account when thinking about these numbers. This is where various model diagnostics become relevant to test whether certain statistical assumptions (e.g., stationarity, measurement error, non-linearity) hold true for a given population under study. Finally, rather than purely relying on recommendations for the number of subjects and observations, researchers can opt to run simulations with their expected effect sizes, type of missing data or relevant parameters to estimate (e.g., only mean + variability or mean + AR) since all of these factors might affect the penultimate reliability in the model estimates. 
 
 Note that different software was used in both studies: [Jongerling, Liu & Williams, 2024](https://osf.io/preprints/psyarxiv/5fk8v_v1) wrote their models in [STAN](https://mc-stan.org/) and fitted them through the R package [CmdStanR](https://mc-stan.org/cmdstanr/), whereas [Schultzberg and Muthén 2018](https://doi.org/10.1080/10705511.2017.1392862) use [Mplus](https://www.statmodel.com/). 
+
+Another advantage of DSEM is the possibility to separate measurement error from the innovations, howver, this is beyond the scope of this tutorial. For more information on DSEM extensions that can separate measurement error from innovations, see [Schuurman & Hamaker, 2019](https://doi.org/10.1037/met0000188). 
 :::
 
 ## Drift Diffusion Modeling (DDM)
@@ -2712,14 +2896,25 @@ cor(real_meas, use = "complete.obs") %>%
   knitr::kable()
 ```
 
+```{r}
+#| label: save-objects
+#| include: false
+
+saveRDS(df.LSME,       "df_LSME.rds")
+saveRDS(df.LSME_wider, "df_LSME_wider.rds")
+saveRDS(real_simdat,   "real_simdat.rds")
+```
+
+
 # Conclusion 
-Throughout this tutorial, we have illustrated the breadth of statistical measures that quantify Cognitive Variability across diffferent types of data. This tutorial will help further empirical investigation of cognitive variability across a wide range of cognitive tasks and experimental settings and enables researchers to make an informed choice among the available measures. 
+Throughout this tutorial, we have illustrated the breadth of statistical measures that can quantify cognitive variability across diffferent types of data. This tutorial will help further empirical investigation of cognitive variability across a wide range of cognitive tasks and experimental settings and enables researchers to make an informed choice among the available measures. 
 
 
 ::: {.callout-note appearance="minimal"}
 **How to cite this tutorial:**
 
-van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: A narrative review of cognitive fluctuation in childhood and adolescence. JOURNAL. DOI:
+van Langen, J., Aristodemou, M, & Kievit. R.A. (2026). Cognitive variability on stable ground: 
+A narrative review of cognitive fluctuation in childhood and adolescence and hands-on tutorial in quantifying (cognitive) variability. JOURNAL. DOI:
 :::
 
 # Appendix 
