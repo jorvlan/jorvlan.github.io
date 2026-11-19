@@ -2080,7 +2080,7 @@ A final extension of this tutorial concerns measures that are specifically tailo
 | **Windowed Variance** | Easy to compute, standardized | (Arbitrary) window size choice | Binary (0/1) data | 
 : Overview of Binary variability measures, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
 
-We applied a 'standardization' procedure to each measure which allows for inter-measure comparisons of variability in binary data. All measures discussed below (except for the autocorrelation) are reported in standardized estimates. 
+We applied a 'standardization' procedure to each measure which allows for inter-measure comparisons of variability in binary data. All measures discussed below (except for the autocorrelation) are reported in standardized estimates. We perform t-tests and correlations to show that the standardization is successful: that is, the mean should be zero (insignificant t-test) and the binary variability scores should not be correlated with the mean score (insignificant correlation).
 
 With very large datasets, the computation of these measures can take some time (it isn't "instant," so to speak), because we need to calculate the minimum, maximum, predicted value, etc., for each standardized value. In other words, the standardization procedure slightly increases the computation time.
 
@@ -2252,7 +2252,7 @@ real_simdat = ifelse(trend_simdat<0, 0, 1)
 ```
 
 
-##### Binary autocorrelation
+### Binary autocorrelation
 
 Contrary to the autocorrelation in continuous data, the autocorrelation in binary data indicates the degree to which (in-)correct responses are to be followed by another (in-)correct response. 
 
@@ -2335,10 +2335,19 @@ to go through the data set and save the results in a vector.
 binAC_ran <- vector()
 for (row in 1:nrow(ran_simdat)) {binAC_ran[row] <- binAC(ran_simdat[row,], k=1)}
 
+# remove non-finite values before testing
+binAC_ran_clean <- binAC_ran[is.finite(binAC_ran)]
+ran_p_clean_ac  <- ran_p[is.finite(binAC_ran)]
+
 # view distribution, compute mean and correlation with mean proportion correct
-hist(binAC_ran)
-t.test(binAC_ran, na.rm = T)
-cor.test(binAC_ran, ran_p)
+ggplot(data.frame(x = binAC_ran_clean), aes(x = x)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  labs(title = "Distribution of binary autocorrelation (random data)",
+       x = "binAC", y = "Count") +
+  theme_minimal()
+
+t.test(binAC_ran_clean)
+cor.test(binAC_ran_clean, ran_p_clean_ac)
 
 # note that the autocorrelations show a slight negative small-sample bias,
 # which disappears for longer time series:
@@ -2346,7 +2355,7 @@ long_simdat = matrix(NA, 100, 100000)
 for (row in 1:nrow(long_simdat)) {long_simdat[row,] = sample(c(1,0), 1000, replace = T)}
 long_binAC_ran <- vector()
 for (row in 1:nrow(long_simdat)) {long_binAC_ran[row] <- binAC(long_simdat[row,], k=1)}
-mean(long_binAC_ran)
+t.test(long_binAC_ran[is.finite(long_binAC_ran)])
 
 # compute in the realistic data set and plot example trajectories
 binAC_real <- vector()
@@ -2474,10 +2483,19 @@ binMSSD = function(ts, output="standardized") {
 binMSSD_ran <- vector()
 for (row in 1:nrow(ran_simdat)) {binMSSD_ran[row] <- binMSSD(ran_simdat[row,])}
 
+# remove non-finite values before testing
+binMSSD_ran_clean <- binMSSD_ran[is.finite(binMSSD_ran)]
+ran_p_clean_mssd  <- ran_p[is.finite(binMSSD_ran)]
+
 # view distribution and mean
-hist(binMSSD_ran)
-t.test(binMSSD_ran, na.rm = T)
-cor.test(binMSSD_ran, ran_p)
+ggplot(data.frame(x = binMSSD_ran_clean), aes(x = x)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  labs(title = "Distribution of binary MSSD (random data)",
+       x = "binMSSD", y = "Count") +
+  theme_minimal()
+
+t.test(binMSSD_ran_clean)
+cor.test(binMSSD_ran_clean, ran_p_clean_mssd)
 
 # compute in the realistic data set and plot example trajectories
 binMSSD_real <- vector()
@@ -2645,10 +2663,19 @@ SCD <- function(ts, output="standardized") {
 SED_ran <- vector()
 for (row in 1:nrow(ran_simdat)) {SED_ran[row] <- SED(ran_simdat[row,])}
 
+# remove non-finite values before testing
+SED_ran_clean <- SED_ran[is.finite(SED_ran)]
+ran_p_clean_sed <- ran_p[is.finite(SED_ran)]
+
 # view distribution and mean
-hist(SED_ran)
-t.test(SED_ran, na.rm = T)
-cor.test(SED_ran, ran_p)
+ggplot(data.frame(x = SED_ran_clean), aes(x = x)) +
+  geom_histogram(bins = 40, fill = "#4C72B0", colour = "white", alpha = .8) +
+  labs(title = "Distribution of sequential error dependency (random data)",
+       x = "SED", y = "Count") +
+  theme_minimal()
+
+t.test(SED_ran_clean)
+cor.test(SED_ran_clean, ran_p_clean_sed)
 
 # compute in the realistic data set and plot example trajectories
 SED_real <- vector()
@@ -2672,7 +2699,8 @@ for each of the $f$ full windows in our time series. The windowed variance is
 computed as the variance of the set of window means:
 
 $$\text{winVar}_{\text{raw}} = \frac{\sum_{j=1}^{f} (\bar{y}_{j} - \bar{\bar{y}})^2}{f-1}$$
-Where $\bar{\bar{x}}$ represents the mean over the window means, which means it 
+
+Where $\bar{\bar{y}}$ represents the mean over the window means, which means it 
 does not include the trials in the remainder. We can imagine alternative 
 procedures for computing the windowed variance, such as a procedure where the 
 remainder trials are counted as an extra remainder window. However, including 
