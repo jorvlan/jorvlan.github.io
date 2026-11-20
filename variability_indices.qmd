@@ -724,6 +724,9 @@ ggplot(df.LSME %>% distinct(subject, diSD_poly), aes(x = diSD_poly)) +
   theme_minimal()
 ```
 
+::: {.callout-note}
+Ram and Gerstorf (2009) distinguished between two types of variability: 'time-structured' variability and 'net' variability. Time-structured variability reflects cognitive fluctuation that is temporally ordered, such as systematic trends and transient clustering such as autocorrelations. Once those effects are accounted for, what remains is net variability, or order-agnostic fluctuations. Not accounting for these temporal structures within cognitive time-series data inflates estimates of cognitive variability.
+:::
 ---
 
 ## intraindividual Coefficient of Variation (iCV)
