@@ -65,7 +65,7 @@ We illustrate each measure through the use of simulated datasets, with the excep
 
 
 ::: {.callout-note}
-Before loading the R packages, users need the C++ toolchain installed to run the DSEM section. Installing this, might take a few minutes. See the comments in the section below on what to install prior to loading R packages.
+All required R packages (including `cmdstanr`, CmdStan and the GitHub-only package `easyRT`) are installed automatically the first time you run or render this tutorial. This one-time setup can take 10–20 minutes. The only thing you need to install yourself, outside R, is a C++ toolchain (needed to compile the Stan models for the DSEM and DDM sections). See the comments in the section below for how to install it on your system.
 
 This tutorial assumes some familiarity with R and basic descriptive statistics. The code and simulated data discussed in this section are available in the [GitHub repository](https://github.com/jorvlan/cognitive_variability_review_project).
 
@@ -82,11 +82,13 @@ Rather work with this tutorial directly in R/Rstudio? The source code for this t
 #| warning: false
 #| results: hide
 
-# set CRAN mirror
-options(repos = c(CRAN = "https://cloud.r-project.org"))
+# set CRAN mirror; use pre-built binary packages where available
+# (avoids compiling packages from source on Windows/macOS)
+options(repos = c(CRAN = "https://cloud.r-project.org"),
+        install.packages.compile.from.source = "never")
 
-# C++ toolchain (needed once, before installing cmdstanr / CmdStan) 
-# Only needed to compile the DSEM model written in Stan. Users can skip this step if they already have a toolchain.
+# C++ toolchain (needed once, before installing CmdStan)
+# Needed to compile the Stan models (DSEM and DDM). Users can skip this step if they already have a toolchain.
 # These steps happen outside R:
 #
 # Windows: install Rtools matching your R version (check with R.version.string),
@@ -95,56 +97,231 @@ options(repos = c(CRAN = "https://cloud.r-project.org"))
 # Linux:   run: sudo apt install build-essential   (Debian/Ubuntu; use the
 #          equivalent for your distribution)
 #
-# After installing cmdstanr below, check the toolchain with:
+# You can check the toolchain at any time with:
 # cmdstanr::check_cmdstan_toolchain()
 
-# install pacman if not already installed
-if (!require("pacman", quietly = TRUE)) install.packages("pacman", quiet = TRUE)
+# ---- 1. Helpers ------------------------------------------------------------
 
-# cmdstanr requires a separate installation from Stan
-if (!require("cmdstanr")) {
-  install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
-  cmdstanr::install_cmdstan()
+# TRUE if a package is installed (without loading it)
+is_installed <- function(pkg) nzchar(system.file(package = pkg))
+
+# On Windows/macOS install pre-built binaries; on Linux packages are built from
+# source. Asking for binaries explicitly matters: with the default ("both"), R
+# resolves dependencies against the *source* versions on CRAN, and silently
+# skips a dependency whose newest source version needs a newer R than yours
+# (e.g. gsl, needed by easyRT via rtdists, now requires R >= 4.5), even though
+# a binary for your R version exists.
+pkg_type <- if (.Platform$pkgType == "source") "source" else "binary"
+
+# install any packages in `pkgs`, *and any of their dependencies*, that are not
+# installed yet. Checking the dependencies too also repairs packages that were
+# installed earlier without all of their dependencies.
+install_if_missing <- function(pkgs, repos = getOption("repos")) {
+  db   <- available.packages(repos = repos, type = pkg_type)
+  deps <- tools::package_dependencies(intersect(pkgs, rownames(db)), db = db,
+                                      which = c("Depends", "Imports", "LinkingTo"),
+                                      recursive = TRUE)
+  needed  <- unique(c(pkgs, unlist(deps, use.names = FALSE)))
+  missing <- needed[!vapply(needed, is_installed, logical(1))]
+  missing <- intersect(missing, rownames(db))
+  if (length(missing) > 0) {
+    message("Installing missing packages: ", paste(missing, collapse = ", "))
+    install.packages(missing, repos = repos, type = pkg_type)
+  }
+
+  # anything that has no binary for this R version: try building from source
+  missing <- needed[!vapply(needed, is_installed, logical(1))]
+  if (length(missing) > 0 && pkg_type == "binary") {
+    install.packages(intersect(missing, rownames(available.packages(repos = repos, type = "source"))),
+                     repos = repos, type = "source")
+  }
+
+  # final check: every requested package must actually load
+  broken <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(broken) > 0) {
+    stop("Could not install or load: ", paste(broken, collapse = ", "),
+         ". Please install these packages manually (updating R to the latest ",
+         "version often helps) and render again.", call. = FALSE)
+  }
+  invisible(TRUE)
 }
 
+# make sure packages are at least a given version, e.g. c(ggdist = "3.3.3").
+# Only packages that are installed but too old are updated (missing packages
+# are handled by install_if_missing()). Must run before these packages are
+# loaded, because a package that is in use cannot be replaced.
+ensure_min_versions <- function(min_versions, repos = getOption("repos")) {
+  pkgs    <- names(min_versions)
+  too_old <- function(pkg) {
+    is_installed(pkg) &&
+      utils::packageVersion(pkg) < package_version(min_versions[[pkg]])
+  }
+  outdated <- pkgs[vapply(pkgs, too_old, logical(1))]
+  if (length(outdated) == 0) return(invisible(TRUE))
 
-# p_load installs any missing packages from CRAN, then loads all
-pacman::p_load(
-  psych,
-  dplyr,
-  lme4,
-  tidyr,
-  effects,
-  broom,
-  ExGaussEstim,
-  easystats,
-  patchwork,
-  brms,
-  tidyverse,
-  kableExtra,
-  formattable,
-  posterior,
-  bayesplot,
-  tidybayes,
-  datawizard,
-  ggdist,
-  pracma,
-  reshape2,
-  GGally,
-  ggplot2
-)
+  message("Updating packages that are too old: ", paste(outdated, collapse = ", "))
+  install_warnings <- character()
+  withCallingHandlers(
+    install.packages(outdated, repos = repos, type = pkg_type),
+    warning = function(w) {
+      install_warnings <<- c(install_warnings, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
 
-# easyRT is only available on GitHub
-if (!require("easyRT")) {
-  if (!require("remotes")) install.packages("remotes")
-  remotes::install_github("DominiqueMakowski/easyRT")
+  # check the update worked, and if not, report what R said and where the old
+  # copy lives (so the problem can be diagnosed)
+  still_old <- outdated[vapply(outdated, too_old, logical(1))]
+  if (length(still_old) > 0) {
+    details <- vapply(still_old, function(p) sprintf(
+      "  %s: version %s found in %s (need >= %s)", p,
+      format(utils::packageVersion(p)), dirname(find.package(p)),
+      min_versions[[p]]), character(1))
+    stop("Could not update: ", paste(still_old, collapse = ", "), "\n",
+         paste(details, collapse = "\n"), "\n",
+         "Packages are installed into: ", .libPaths()[1], "\n",
+         if (length(install_warnings) > 0)
+           paste0("R reported:\n  ", paste(install_warnings, collapse = "\n  "), "\n"),
+         "Please update these packages manually in a fresh R session and render again.",
+         call. = FALSE)
+  }
+  invisible(TRUE)
 }
 
-# load packages that require special installation separately
+# ---- 2. CRAN packages ------------------------------------------------------
+
+# ggplot2 4.0 (2025) changed its internals, and older versions of several
+# ggplot2 extensions break with it (e.g. ggdist < 3.3.3 fails with
+# "unused argument (theme = ...)"). These are the first versions that work
+# with ggplot2 4.0; older installed copies are updated *before* anything
+# loads them.
+ensure_min_versions(c(
+  ggplot2   = "3.5.2",
+  ggdist    = "3.3.3",
+  GGally    = "2.3.0",
+  bayesplot = "1.15.0",
+  patchwork = "1.3.1",
+  see       = "0.12.0"
+))
+
+install_if_missing(c(
+  "psych", "dplyr", "lme4", "tidyr", "effects", "broom", "ExGaussEstim",
+  "easystats", "patchwork", "brms", "tidyverse", "kableExtra",
+  "formattable", "posterior", "bayesplot", "tidybayes", "datawizard",
+  "ggdist", "pracma", "reshape2", "GGally", "ggplot2", "knitr",
+  "grateful", "remotes",
+  "rtdists", "rlang"  # dependencies of easyRT (installed from GitHub below)
+))
+
+# ---- 3. cmdstanr (not on CRAN) + CmdStan -----------------------------------
+
+install_if_missing("cmdstanr",
+                   repos = c("https://stan-dev.r-universe.dev",
+                             "https://mc-stan.org/r-packages/",
+                             getOption("repos")))
+
+# CmdStan itself is separate from the cmdstanr R package; install it once
+if (is.null(cmdstanr::cmdstan_version(error_on_NA = FALSE))) {
+  toolchain_ok <- tryCatch({
+    cmdstanr::check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
+    TRUE
+  }, error = function(e) {
+    message(conditionMessage(e))
+    FALSE
+  })
+  if (!toolchain_ok) {
+    stop("No working C++ toolchain was found, so CmdStan cannot be installed.\n",
+         "Install the toolchain for your system (see the comments at the top ",
+         "of this chunk), restart R and render again.", call. = FALSE)
+  }
+  cmdstanr::install_cmdstan(cores = max(1, parallel::detectCores() - 1))
+}
+
+# ---- 4. easyRT (only available on GitHub) ----------------------------------
+
+if (!is_installed("easyRT")) {
+  # first try remotes; this can fail, e.g. when the GitHub API rate limit is hit
+  try(remotes::install_github("DominiqueMakowski/easyRT",
+                              upgrade = "never", dependencies = FALSE),
+      silent = TRUE)
+}
+if (!is_installed("easyRT")) {
+  # fallback: download the source directly (no GitHub API needed).
+  # easyRT is pure R code, so no compiler is needed.
+  zip_file <- tempfile(fileext = ".zip")
+  src_dir  <- tempfile()
+  download.file("https://github.com/DominiqueMakowski/easyRT/archive/refs/heads/main.zip",
+                zip_file, mode = "wb", quiet = TRUE)
+  unzip(zip_file, exdir = src_dir)
+  install.packages(list.files(src_dir, full.names = TRUE)[1],
+                   repos = NULL, type = "source")
+}
+install_if_missing("easyRT")  # stops with a clear message if it still failed
+
+# ---- 5. Load packages ------------------------------------------------------
+# (explicit library() calls so that grateful can detect and cite them)
+
+library(psych)
+library(dplyr)
+library(lme4)
+library(tidyr)
+library(effects)
+library(broom)
+library(ExGaussEstim)
+library(easystats)
+library(patchwork)
+library(brms)
+library(tidyverse)
+library(kableExtra)
+library(formattable)
+library(posterior)
+library(bayesplot)
+library(tidybayes)
+library(datawizard)
+library(ggdist)
+library(pracma)
+library(reshape2)
+library(GGally)
+library(ggplot2)
 library(cmdstanr)
 library(easyRT)
-```
 
+# ---- 6. Data files and helper scripts --------------------------------------
+# Some sections read data and helper scripts from the folder this .qmd is in.
+# If a file is not there (e.g. when only the .qmd was downloaded), it is
+# downloaded from the tutorial's GitHub repository.
+
+repo_url <- "https://raw.githubusercontent.com/jorvlan/cognitive_variability_review_project/refs/heads/main/quarto_variability_tutorial/"
+
+fetch_if_missing <- function(files, base_url = repo_url) {
+  for (f in files) {
+    if (file.exists(f)) next
+    ok <- tryCatch({
+      download.file(paste0(base_url, f), f, mode = "wb", quiet = TRUE)
+      TRUE
+    }, warning = function(w) FALSE, error = function(e) FALSE)
+    if (!ok || !file.exists(f) || file.size(f) == 0) {
+      if (file.exists(f)) file.remove(f)  # remove partial/empty downloads
+      stop("The file '", f, "' is missing. Put it in the same folder as this ",
+           ".qmd (", getwd(), "), or make sure it can be downloaded from:\n",
+           base_url, f, call. = FALSE)
+    }
+  }
+  invisible(TRUE)
+}
+
+# references used in the text (read by Quarto after the R code has run).
+# This one is not essential: if it cannot be found, an empty file is created
+# so the tutorial still renders; Quarto then warns about the citations it
+# cannot resolve (they show up as "?" in the text).
+bib_placeholder <- "% placeholder: my-refs.bib could not be found or downloaded"
+if (file.exists("my-refs.bib") &&
+    identical(readLines("my-refs.bib", n = 1, warn = FALSE), bib_placeholder)) {
+  file.remove("my-refs.bib")  # retry the download if a placeholder was left behind
+}
+tryCatch(fetch_if_missing("my-refs.bib"),
+         error = function(e) writeLines(bib_placeholder, "my-refs.bib"))
+```
 
 ## Simulated data
 
@@ -1741,7 +1918,8 @@ m_ddm <- brm(formula,
              warmup    = 500,
              iter      = 1500,
              algorithm = "sampling",
-             init      = init_func)
+             init      = init_func,
+             backend   = "cmdstanr")  # reuse CmdStan (installed in the setup chunk))
              
 saveRDS(m_ddm, "m_ddm.rds")
 ```
@@ -1850,9 +2028,9 @@ Relative Variability measures are suitable for double bounded data (e.g., VAS 0-
 : Overview of Relative Variability measures, their strengths, limitations, and suitable data types. {#tbl-overview .striped .hover}
 
 
-#### Step 1: Download the source files
+#### Step 1: Source files
 
-Source files for the Relative variability indices in R can be found [here:](https://ppw.kuleuven.be/okp/software/relative_variability/)
+The source files for the Relative variability indices were developed by the Research Group of Quantitative Psychology and Individual Differences (KU Leuven) and are available [here](https://ppw.kuleuven.be/okp/software/relative_variability/). If you use them in a publication, cite Mestdagh et al. (2018). When you render this tutorial, the files are downloaded automatically. 
 
 #### Step 2: Read in the provided data: ESMData.rda 
 ```{r}
@@ -1860,13 +2038,13 @@ Source files for the Relative variability indices in R can be found [here:](http
 #| cache: false
 #| eval: true
 #| code-fold: false
+fetch_if_missing("ESMData.rda")  # downloads the file if it is not in this folder
 load("ESMData.rda")
 ESMData %>% 
   dplyr::filter(ID %in% unique(ID)[1:5]) %>% 
   group_by(ID) %>% 
   slice_head(n = 5) %>% 
   knitr::kable()
-
 ```
 
 Here we only show the first 5 rows of 5 different subjects, however there are more subject and each subject has more than 5 observations. 
@@ -1889,40 +2067,25 @@ MAX_val <- max(ESMData$Sad, na.rm = TRUE)
 ```
 
 
-#### Step 3: Source the files from the folder where the download landed.
+#### Step 3: Source the files and estimate the measures
 ```{r}
 #| label: relvar-result
 #| code-fold: true
 #| eval: true
 
-source("bestDivision.R")
-source("checkInput.R")
-source("checkOutput.R")
-source("IPR.R")
-source("IQR.R")
-source("maximumIQR.R")
-source("maximumVAR.R")
-source("maximumIPR.R")
-source("maximumRMSSD.R")
-source("maximumMSSD.R")
-source("maximumRANGE.R")
-source("maximumSD.R")
-source("maxMssdGetN.R")
-source("mostLeast.R")
-source("mssdParts.R")
-source("RMSSD.R")
-source("MSSD.R")
-source("RANGE.R")
-source("tryAdd.R")
-source("updateUseFill.R")
+# download any of the scripts that are not in this folder
+rv_files <- c(
+  "bestDivision.R", "checkInput.R", "checkOutput.R", "IPR.R", "IQR.R",
+  "maximumIQR.R", "maximumVAR.R", "maximumIPR.R", "maximumRMSSD.R",
+  "maximumMSSD.R", "maximumRANGE.R", "maximumSD.R", "maxMssdGetN.R",
+  "mostLeast.R", "mssdParts.R", "RMSSD.R", "MSSD.R", "RANGE.R", "tryAdd.R",
+  "updateUseFill.R", "relativeSD.R", "relativeVAR.R", "relativeIQR.R",
+  "relativeRANGE.R", "relativeRMSSD.R", "relativeMSSD.R"
+)
+fetch_if_missing(rv_files)
 
-# source the relative measures
-source("relativeSD.R")
-source("relativeVAR.R")
-source("relativeIQR.R")
-source("relativeRANGE.R")
-source("relativeRMSSD.R")
-source("relativeMSSD.R")
+# source the helper scripts and the relative measures (same order as listed above)
+for (f in rv_files) source(f)
 
 results <- ESMData %>%
   group_by(ID) %>%
@@ -2095,18 +2258,15 @@ First we load the required R packages and simulate two datasets: (1) a random si
 #| code-fold: false
 #| eval: true
 
-options(repos = c(CRAN = "https://cloud.r-project.org"))
-if (!require("pacman", quietly = TRUE)) install.packages("pacman", quiet = TRUE)
+# these packages were installed in the setup chunk at the top of the tutorial
+library(psych)
+library(ggplot2)
+library(reshape2)
 
-pacman::p_load(psych, stats, ggplot2, reshape2)
+# All functions used in this section (plot_meas, binAC, binMSSD, SED, SCD,
+# winVar) are defined in the code chunks below, so no helper scripts are needed.
 
-# Load helper scripts, necessary to make this work when publishing the tutorial. 
-# These are not needed when users work with the tutorial as code chunks of these are included below.
-source("PlotMeasures_Function.R") #required for some plotting functions
-source("BinVar_Functions.R") #same functions as illustrated in the code blocks below.
-
-# For the MSSD, sequential streakiness, and windowed SD, a "standardization procedure" is performed. The functions will output the standardized value by default; it is also possible to specify that you want the "raw" or partly standardized values (see the Bivar_Functions.R script for more information). The functions accept data frames with a time series per row as input. The output is a vector or a data frame with values.
-
+# For the MSSD, sequential streakiness, and windowed SD, a "standardization procedure" is performed. The functions will output the standardized value by default; it is also possible to specify that you want the "raw" or partly standardized values (see the `output` argument of each function below). The functions accept a single time series (vector) as input and return a single value. The output is a vector or a dataframe with values. 
 ```
 
 #### Helper function to plot the binary variability 
